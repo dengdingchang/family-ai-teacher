@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="爸爸老师示意头像">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff2cf"/>
+      <stop offset="1" stop-color="#cbe9f4"/>
+    </linearGradient>
+    <linearGradient id="shirt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4d6fd9"/>
+      <stop offset="1" stop-color="#273c8c"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="244" fill="url(#bg)"/>
+  <path d="M95 493c10-96 62-148 161-148s151 52 161 148" fill="url(#shirt)"/>
+  <path d="M190 360l66 55 66-55-24-42h-84z" fill="#f2b694"/>
+  <ellipse cx="256" cy="238" rx="133" ry="151" fill="#f6c19e"/>
+  <path d="M128 220c-17-111 42-166 131-166 96 0 140 66 123 171-25-31-47-67-61-106-43 43-102 70-193 72z" fill="#3b2940"/>
+  <path d="M145 213c-3-78 44-127 110-127 82 0 112 55 109 117-49-12-99-45-121-82-25 50-60 78-98 92z" fill="#3b2940"/>
+  <ellipse cx="207" cy="245" rx="10" ry="13" fill="#26324e"/>
+  <ellipse cx="305" cy="245" rx="10" ry="13" fill="#26324e"/>
+  <path d="M189 215c13-11 28-14 43-6M281 209c15-8 30-5 43 6" fill="none" stroke="#5b3a43" stroke-width="8" stroke-linecap="round"/>
+  <path d="M256 250c-7 20-9 31 7 35" fill="none" stroke="#c17f71" stroke-width="6" stroke-linecap="round"/>
+  <path d="M218 302c24 17 51 17 76 0" fill="none" stroke="#8b4a5d" stroke-width="7" stroke-linecap="round"/>
+  <path d="M191 370l65 48 65-48 48 123H143z" fill="#fff" opacity=".9"/>
+  <path d="M231 378l25 40 25-40" fill="none" stroke="#d8e2ff" stroke-width="7"/>
+  <circle cx="410" cy="110" r="26" fill="#fff" opacity=".7"/>
+  <path d="M399 110h22M410 99v22" stroke="#6c82e8" stroke-width="5" stroke-linecap="round"/>
+</svg>

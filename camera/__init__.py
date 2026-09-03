@@ -1,0 +1,1 @@
+"""Browser camera contracts."""

@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.playwright-cli/
+.mypy_cache/
+.ruff_cache/
+data/child_profile.json
+data/session_history.jsonl
+data/learning_events.jsonl
+data/*.tmp
+runtime/
+output/
+*.log
+frontend/nathan-avatar.jpg
