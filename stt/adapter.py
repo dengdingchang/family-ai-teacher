@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +34,13 @@ def _hidden_process_kwargs() -> dict:
     return {}
 
 
+def _stderr_tail(stderr: str, limit: int = 280) -> str:
+    """Keep actionable worker diagnostics without returning a large traceback."""
+
+    compact = " ".join(line.strip() for line in stderr.splitlines() if line.strip())
+    return compact[-limit:]
+
+
 class FasterWhisperCPUAdapter:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -48,13 +57,18 @@ class FasterWhisperCPUAdapter:
         if not self.ready:
             raise STTAdapterError("Existing faster-whisper CPU runtime or model is not available")
 
+        normalized_path: Path | None = None
+        input_path = audio_path
+        if audio_path.suffix.lower() in {".webm", ".weba", ".ogg", ".opus", ".m4a", ".mp4"}:
+            input_path, normalized_path = self._normalize_browser_audio(audio_path)
+
         command = [
             str(self.settings.stt_python),
             "-E",
             "-s",
             str(self.worker),
             "--audio",
-            str(audio_path),
+            str(input_path),
             "--model",
             str(self.settings.stt_model_path),
             "--language",
@@ -88,9 +102,17 @@ class FasterWhisperCPUAdapter:
             completed, gpu = GpuMeter().run(run)
         except subprocess.TimeoutExpired as exc:
             raise STTAdapterError("STT timed out") from exc
+        finally:
+            if normalized_path is not None:
+                try:
+                    normalized_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         elapsed_s = round(time.perf_counter() - started, 3)
         if completed.returncode != 0:
-            raise STTAdapterError(f"STT exited with code {completed.returncode}")
+            detail = _stderr_tail(completed.stderr)
+            suffix = f": {detail}" if detail else ""
+            raise STTAdapterError(f"STT exited with code {completed.returncode}{suffix}")
         records = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
         try:
             payload = json.loads(records[-1])
@@ -103,3 +125,52 @@ class FasterWhisperCPUAdapter:
             elapsed_s=elapsed_s,
             gpu=gpu,
         )
+
+    def _normalize_browser_audio(self, audio_path: Path) -> tuple[Path, Path]:
+        """Convert browser containers to a conservative mono PCM WAV for faster-whisper."""
+
+        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+        handle = tempfile.NamedTemporaryFile(
+            prefix="family-ai-teacher-stt-normalized-",
+            suffix=".wav",
+            dir=self.settings.temp_dir,
+            delete=False,
+        )
+        output_path = Path(handle.name)
+        handle.close()
+        command = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(audio_path),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(output_path),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                check=False,
+                **_hidden_process_kwargs(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            output_path.unlink(missing_ok=True)
+            raise STTAdapterError("STT browser-audio conversion failed") from exc
+        if completed.returncode != 0 or not output_path.is_file() or output_path.stat().st_size == 0:
+            detail = _stderr_tail(completed.stderr)
+            output_path.unlink(missing_ok=True)
+            suffix = f": {detail}" if detail else ""
+            raise STTAdapterError(f"STT browser-audio conversion failed{suffix}")
+        return output_path, output_path

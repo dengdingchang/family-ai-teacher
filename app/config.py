@@ -70,6 +70,8 @@ class Settings:
     tts_language: str
     tts_dtype: str
     tts_timeout_seconds: float
+    tts_mode: str
+    tts_cpu: bool
 
     avatar_image_path: Path | None
 
@@ -137,6 +139,8 @@ class Settings:
             tts_language=os.getenv("TTS_LANGUAGE", "Chinese").strip() or "Chinese",
             tts_dtype=os.getenv("TTS_DTYPE", "float16").strip() or "float16",
             tts_timeout_seconds=float(os.getenv("TTS_TIMEOUT_SECONDS", "180")),
+            tts_mode=os.getenv("TTS_MODE", "persistent").strip().lower() or "persistent",
+            tts_cpu=os.getenv("TTS_CPU", "0").strip().lower() in {"1", "true", "yes", "on"},
             avatar_image_path=avatar_path,
         )
 

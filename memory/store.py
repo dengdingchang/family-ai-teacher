@@ -70,6 +70,22 @@ class MemoryStore:
                     records.append(value)
             return records[-max(0, limit) :]
 
+    def get_recent_learning_events(self, limit: int = 6) -> list[dict[str, Any]]:
+        """Return only recent text events; media is never read from this store."""
+
+        with self._lock:
+            if not self.learning_events_path.is_file():
+                return []
+            records: list[dict[str, Any]] = []
+            for line in self.learning_events_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    records.append(value)
+            return records[-max(0, limit) :]
+
     def _append_jsonl(self, path: Path, record: dict[str, Any]) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:

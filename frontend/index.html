@@ -5,92 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>爸爸老师 · 家庭 AI 教室</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260903-4" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">FAMILY AI TEACHER · PHASE 1</p>
+          <p class="eyebrow">FAMILY AI TEACHER · PHASE 2</p>
           <h1>爸爸老师</h1>
           <p class="subtitle">Nathan 设计的 AI 爸爸老师，陪你一起发现小问题。</p>
         </div>
         <span id="serviceBadge" class="badge">准备中</span>
       </header>
 
-      <section class="main-grid">
-        <section class="card avatar-card" aria-label="爸爸老师头像">
-          <div class="avatar-stage" id="avatarStage">
-            <div class="halo"></div>
-            <img id="avatarImage" src="/api/avatar" alt="爸爸老师头像" />
-            <div id="mouth" class="mouth mouth-closed" aria-hidden="true">
-              <img class="mouth-reveal" src="/api/avatar" alt="" />
-              <img class="mouth-skin" src="/api/avatar" alt="" />
-              <span class="mouth-line"></span>
-            </div>
-            <div class="speech-glow" aria-hidden="true"></div>
+      <section class="card avatar-card" aria-label="爸爸老师和孩子画面">
+        <div class="visual-heading">
+          <span class="eyebrow">DAD &amp; ME</span>
+          <button class="help-tip" type="button" aria-label="画面帮助" title="爸爸在大画面里；摄像头打开后，孩子画面会出现在右上角。">?</button>
+        </div>
+        <div class="avatar-stage" id="avatarStage">
+          <div class="halo"></div>
+          <img id="avatarImage" src="/api/avatar" alt="爸爸老师头像" />
+          <div id="mouth" class="mouth mouth-closed" aria-hidden="true">
+            <img class="mouth-reveal" src="/api/avatar" alt="" />
+            <img class="mouth-skin" src="/api/avatar" alt="" />
+            <span class="mouth-line"></span>
           </div>
-          <div class="avatar-caption">
-            <span class="dot"></span>
-            <span id="statusText">正在连接本地服务…</span>
+          <div class="speech-glow" aria-hidden="true"></div>
+          <div class="child-preview" aria-label="孩子自己的画面">
+            <video id="cameraVideo" autoplay playsinline muted></video>
+            <span>我</span>
           </div>
-          <p class="hint">点一下开始持续交流；你每次停顿后，爸爸老师会自动回答。再点一下结束。</p>
-        </section>
+        </div>
+        <div class="avatar-caption">
+          <span class="dot"></span>
+          <span id="statusText">正在连接本地服务…</span>
+        </div>
+        <p id="recordHint" class="sr-only" aria-live="polite"></p>
+      </section>
 
-        <section class="card interaction-card" aria-label="儿童交互">
-          <div class="card-heading">
+      <section class="card interaction-card" aria-label="儿童交互">
+        <div class="card-heading">
+          <div class="title-with-help">
             <div>
               <p class="eyebrow">TALK</p>
               <h2>和爸爸老师说话</h2>
             </div>
-            <span class="step-chip">1 · 开始交流</span>
+            <button class="help-tip" type="button" aria-label="交流帮助" title="点一次开始持续交流；孩子说完停一下，爸爸老师会自动回答。再点一次结束。">?</button>
           </div>
-          <button id="recordButton" class="record-button" type="button" aria-pressed="false">
-            <span class="record-icon" aria-hidden="true"></span>
-            <span id="recordLabel">点一下开始交流</span>
-          </button>
-          <p id="recordHint" class="small-note">开始后不用反复点击；说完停一下，爸爸老师会接着回答。第一次使用时，请允许麦克风权限。</p>
-          <div class="or-row"><span></span><em>也可以先打字试试</em><span></span></div>
-          <form id="textForm" class="text-form">
-            <input id="textInput" type="text" maxlength="500" placeholder="例如：爸爸老师，我想学恐龙。" autocomplete="off" />
-            <button type="submit">发送</button>
-          </form>
-          <div id="answerBox" class="answer-box" aria-live="polite">
-            <span class="answer-label">爸爸老师会在这里回答</span>
+          <span class="step-chip">持续交流</span>
+        </div>
+        <div class="chat-stream" aria-live="polite">
+          <div class="chat-message child-message">
+            <span class="chat-speaker">我</span>
+            <p id="userTextBox">还没有说话</p>
           </div>
-        </section>
+          <div class="chat-message dad-message">
+            <span class="chat-speaker">爸爸老师</span>
+            <div id="answerBox" class="answer-box">
+              <span class="answer-label">爸爸老师会在这里回答</span>
+            </div>
+          </div>
+        </div>
+        <form id="textForm" class="text-form">
+          <input id="textInput" type="text" maxlength="500" placeholder="给大孩子的文字入口" autocomplete="off" aria-label="文字输入" />
+          <button type="submit">发送</button>
+        </form>
+        <button id="recordButton" class="record-button" type="button" aria-pressed="false">
+          <span class="record-icon" aria-hidden="true"></span>
+          <span id="recordLabel">点一下开始交流</span>
+        </button>
       </section>
 
       <section class="card camera-card" aria-label="摄像头">
         <div class="card-heading compact">
-          <div>
-            <p class="eyebrow">CAMERA · EXPLICIT ONLY</p>
-            <h2>摄像头预览</h2>
+          <div class="title-with-help">
+            <div>
+              <p class="eyebrow">CAMERA · CHILD VIEW</p>
+              <h2>看一看</h2>
+            </div>
+            <button class="help-tip" type="button" aria-label="摄像头帮助" title="交流中每15秒只准备一帧；拍照和短视频只有在你点击后才会发送给 AI Station。">?</button>
           </div>
-          <span id="captureState" class="step-chip">不会自动上传</span>
+          <span id="captureState" class="step-chip">按需查看</span>
         </div>
         <div class="camera-layout">
-          <div class="camera-preview-wrap">
-            <video id="cameraVideo" autoplay playsinline muted></video>
+          <div class="camera-preview-wrap capture-preview">
             <canvas id="captureCanvas" hidden></canvas>
             <img id="capturedFrame" alt="最近一次手动截取的画面" hidden />
+            <span class="capture-placeholder">📷</span>
           </div>
           <div class="camera-actions">
-            <p>只有点击“截取一帧”时，才会把这一帧短暂交给本机接口；本阶段不会保存图片，也不会调用 Vision。</p>
             <div class="button-row">
-              <button id="cameraButton" class="secondary-button" type="button">打开摄像头</button>
-              <button id="captureButton" class="secondary-button" type="button" disabled>截取一帧</button>
+              <button id="captureButton" class="secondary-button icon-button" type="button" aria-label="拍一张给爸爸看" title="拍一张给爸爸看">📸</button>
+              <button id="cameraButton" class="secondary-button icon-button" type="button" aria-label="打开摄像头" title="打开摄像头">📹</button>
+              <button id="recordVideoButton" class="secondary-button icon-button" type="button" disabled aria-label="录一小段给爸爸看" title="录一小段给爸爸看">🎥</button>
             </div>
             <span id="cameraStatus" class="small-note">摄像头尚未打开</span>
+            <div id="visionResult" class="vision-result" aria-live="polite" hidden></div>
           </div>
         </div>
       </section>
 
       <footer class="privacy-note">
         <span aria-hidden="true">🔒</span>
-        <span>隐私保护：本机不保存原始录音或视频，不自动上传摄像头画面；只保留文字对话、学习事件和儿童资料。</span>
+        <button class="help-tip" type="button" aria-label="隐私说明" title="本机不保存原始录音或视频；自动画面只在下一轮对话临时发送，随后丢弃。">?</button>
       </footer>
     </main>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=20260903-4"></script>
   </body>
 </html>
