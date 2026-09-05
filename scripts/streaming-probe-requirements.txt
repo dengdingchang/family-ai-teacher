@@ -1,0 +1,10 @@
+# Isolated experiment only. Never install into the running Nathan runtime.
+# CUDA wheels are resolved from https://download.pytorch.org/whl/cu128.
+faster-qwen3-tts==0.4.0
+qwen-tts-hf==0.1.1.post1
+transformers==5.15.1
+torch==2.7.1+cu128
+torchaudio==2.7.1+cu128
+# Bound resolver backtracking for the compatibility package's UI dependency.
+# This does not start a Gradio server.
+gradio==6.26.0

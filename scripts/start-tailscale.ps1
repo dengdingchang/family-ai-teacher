@@ -56,4 +56,9 @@ Write-Host "Family AI Teacher: http://127.0.0.1:$port"
 Write-Host "Tailnet WebUI: $publicUrl"
 Write-Host 'Tailscale Serve is tailnet-only; no public Funnel is enabled.'
 Write-Host 'Press Ctrl+C to stop the app. The Serve route remains configured for the next start.'
-& $runtime.Python -S -m uvicorn app.main:app --host 127.0.0.1 --port $port
+$tunnel = Start-FamilyAiInferenceTunnel -ProjectRoot $projectRoot
+try {
+    & $runtime.Python -S -m uvicorn app.main:app --host 127.0.0.1 --port $port
+} finally {
+    Stop-FamilyAiInferenceTunnel -Process $tunnel
+}

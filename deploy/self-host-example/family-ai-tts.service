@@ -1,0 +1,32 @@
+[Unit]
+Description=Family AI Teacher Nathan TTS
+After=vllm-qwen38-27b-nvfp4.service family-ai-soulx.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/selfhost/family-ai-teacher/services
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=TTS_MODEL_PATH=/media/selfhost/ssd4t-data1/family-ai-teacher/models/Qwen3-TTS-12Hz-1.7B-Base
+Environment=TTS_REF_AUDIO=/home/selfhost/family-ai-teacher/assets/nathan/Nathan_emotion_calm.wav
+Environment=TTS_LANGUAGE=Chinese
+Environment=TTS_ATTENTION_IMPLEMENTATION=flash_attention_2
+Environment=TTS_GPU_MEMORY_FRACTION=0.06
+Environment=TTS_MIN_FREE_MIB=17000
+Environment=TTS_PORT=8792
+Environment=AVATAR_WS_URL=ws://127.0.0.1:8791
+Environment=TTS_AVATAR_LEAD_MS=320
+Environment=VLLM_HEALTH_URL=http://127.0.0.1:8002/health
+ExecStart=/home/selfhost/family-ai-teacher/runtime/tts/.venv/bin/python /home/selfhost/family-ai-teacher/services/remote_tts_server.py
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=180
+TimeoutStopSec=20
+KillMode=mixed
+MemoryMax=24G
+OOMScoreAdjust=500
+Nice=5
+
+[Install]
+WantedBy=default.target

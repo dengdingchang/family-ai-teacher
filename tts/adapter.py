@@ -25,6 +25,12 @@ class TTSResult:
     duration_s: float
     elapsed_s: float
     gpu: GpuMeasurement
+    backend: str = "local"
+    audio_mime: str = "audio/wav"
+    avatar_cued: bool = False
+    avatar_audio_lead_ms: int = 0
+    avatar_cue_id: str = ""
+    server_elapsed_s: float | None = None
 
 
 def _hidden_process_kwargs() -> dict:
@@ -56,7 +62,13 @@ class NathanTTSAdapter:
                     return str(item["ref_text"])
         raise TTSAdapterError("Chinese Nathan reference text was not found")
 
-    def synthesize(self, text: str) -> TTSResult:
+    def synthesize(
+        self,
+        text: str,
+        *,
+        avatar_flush: bool = True,
+        defer_avatar: bool = False,
+    ) -> TTSResult:
         text = " ".join(text.strip().split())
         if not text:
             raise TTSAdapterError("TTS text is empty")

@@ -55,6 +55,7 @@ class Settings:
     llm_api_key: str
     llm_model: str
     llm_timeout_seconds: float
+    llm_vision_timeout_seconds: float
 
     stt_python: Path
     stt_model_path: Path
@@ -71,9 +72,17 @@ class Settings:
     tts_dtype: str
     tts_timeout_seconds: float
     tts_mode: str
+    tts_prompt_mode: str
+    tts_remote_base_url: str
+    tts_remote_timeout_seconds: float
     tts_cpu: bool
 
     avatar_image_path: Path | None
+    avatar_ws_url: str
+    avatar_audio_lead_ms: int
+    tts_remote_retry_cooldown_seconds: float = 30.0
+    tts_streaming_python: Path | None = None
+    avatar_idle_path: Path | None = None
 
     @classmethod
     def load(cls) -> "Settings":
@@ -90,6 +99,13 @@ class Settings:
         data_dir = PROJECT_ROOT / "data"
         avatar_value = os.getenv("AVATAR_IMAGE_PATH", "").strip()
         avatar_path = Path(avatar_value).expanduser() if avatar_value else None
+        idle_value = os.getenv("AVATAR_IDLE_PATH", "").strip()
+        idle_path = Path(idle_value).expanduser() if idle_value else None
+        if idle_path is not None and not idle_path.is_absolute():
+            idle_path = PROJECT_ROOT / idle_path
+        tts_prompt_mode = os.getenv("TTS_PROMPT_MODE", "speaker_vector").strip().lower()
+        if tts_prompt_mode not in {"speaker_vector", "icl"}:
+            tts_prompt_mode = "speaker_vector"
 
         return cls(
             project_root=PROJECT_ROOT,
@@ -104,7 +120,11 @@ class Settings:
             llm_base_url=os.getenv("LLM_BASE_URL", "").strip().rstrip("/"),
             llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
             llm_model=os.getenv("LLM_MODEL", "").strip(),
-            llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
+            llm_timeout_seconds=max(2.0, min(30.0, float(os.getenv("LLM_TIMEOUT_SECONDS", "8")))),
+            llm_vision_timeout_seconds=max(
+                5.0,
+                min(120.0, float(os.getenv("LLM_VISION_TIMEOUT_SECONDS", "25"))),
+            ),
             stt_python=_path_env(
                 "STT_PYTHON",
                 r"X:\AI\faster-whisper-offline\python-3.10.11-embed-amd64\python.exe",
@@ -140,8 +160,20 @@ class Settings:
             tts_dtype=os.getenv("TTS_DTYPE", "float16").strip() or "float16",
             tts_timeout_seconds=float(os.getenv("TTS_TIMEOUT_SECONDS", "180")),
             tts_mode=os.getenv("TTS_MODE", "persistent").strip().lower() or "persistent",
+            tts_prompt_mode=tts_prompt_mode,
+            tts_remote_base_url=os.getenv(
+                "TTS_REMOTE_BASE_URL", "http://127.0.0.1:8792"
+            ).strip(),
+            tts_remote_timeout_seconds=float(os.getenv("TTS_REMOTE_TIMEOUT_SECONDS", "30")),
+            tts_remote_retry_cooldown_seconds=float(os.getenv("TTS_REMOTE_RETRY_COOLDOWN_SECONDS", "30")),
+            tts_streaming_python=_path_env(
+                "TTS_STREAMING_PYTHON", str(PROJECT_ROOT / "runtime/tts-streaming-probe-venv/Scripts/python.exe"),
+            ),
             tts_cpu=os.getenv("TTS_CPU", "0").strip().lower() in {"1", "true", "yes", "on"},
             avatar_image_path=avatar_path,
+            avatar_idle_path=idle_path,
+            avatar_ws_url=os.getenv("AVATAR_WS_URL", "ws://127.0.0.1:8791").strip(),
+            avatar_audio_lead_ms=max(0, min(1500, int(os.getenv("AVATAR_AUDIO_LEAD_MS", "900")))),
         )
 
     @property

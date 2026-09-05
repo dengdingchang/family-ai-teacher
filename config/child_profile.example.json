@@ -2,5 +2,18 @@
   "name": "",
   "age": 4,
   "preferred_language": "zh-CN",
-  "interests": []
+  "interests": [],
+  "teaching_preferences": [],
+  "learning_goals": [],
+  "teacher_style": "warm_guided",
+  "content_boundaries": [],
+  "enabled_activities": [
+    "drawing",
+    "story",
+    "game",
+    "music",
+    "vision_photo",
+    "vision_video"
+  ],
+  "brain_mode": "ai_station"
 }

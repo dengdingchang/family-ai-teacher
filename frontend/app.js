@@ -1,28 +1,61 @@
+import "/pcm-player.js?v=20260906-stream1";
+import "/voice-activity.js?v=20260906-1";
+
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
 const recordButton = document.querySelector("#recordButton");
 const recordLabel = document.querySelector("#recordLabel");
 const recordHint = document.querySelector("#recordHint");
+const chatHistory = document.querySelector("#chatHistory");
+const chatEmpty = document.querySelector("#chatEmpty");
+const liveTurn = document.querySelector("#liveTurn");
 const userTextBox = document.querySelector("#userTextBox");
 const answerBox = document.querySelector("#answerBox");
 const textForm = document.querySelector("#textForm");
 const textInput = document.querySelector("#textInput");
-const avatarStage = document.querySelector("#avatarStage");
-const mouth = document.querySelector("#mouth");
 const dot = document.querySelector(".dot");
+const avatarImage = document.querySelector("#avatarImage");
+const avatarIdle = document.querySelector("#avatarIdle");
+const avatarCanvas = document.querySelector("#avatarCanvas");
+const avatarStateText = document.querySelector("#avatarStateText");
+const avatarStage = document.querySelector("#avatarStage");
+const activityButtons = [...document.querySelectorAll(".activity-chip")];
+const childWelcome = document.querySelector("#childWelcome");
+const conversationTitle = document.querySelector("#conversationTitle");
+const defaultEnabledActivities = ["drawing", "story", "game", "music", "vision_photo", "vision_video"];
+let enabledActivities = new Set(defaultEnabledActivities);
+let childProfileLoaded = false;
 
 let recordingStream = null;
 let audioContext = null;
 let activeAudio = null;
 let activeAudioUrl = null;
-let analyser = null;
-let mouthFrame = null;
-let mouthEnergy = 0;
 let audioQueue = [];
 let queueDraining = false;
 let queueGeneration = 0;
 let queueDrainWaiters = [];
+let queuePlaybackError = null;
 let activePlayback = null;
+let streamingPlayback = null;
+let streamingAudioContext = null;
+let avatarSocket = null;
+let avatarReady = false;
+let avatarReconnectTimer = null;
+let avatarReconnectDelayMs = 1200;
+let avatarDrawing = false;
+let avatarDecoder = null;
+let avatarEncodedQueue = [];
+let avatarPumpTimer = null;
+let avatarNeedsKeyframe = true;
+let avatarAcceptFrames = false;
+let avatarFrameGeneration = 0;
+let avatarAudioLeadMs = 900;
+let avatarFrameSerial = 0;
+let avatarFrameWaiters = [];
+let avatarIdleReady = false;
+let avatarIdleFailed = false;
+let avatarIdleConfigured = false;
+const avatarReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 let inputSource = null;
 let inputAnalyser = null;
@@ -39,6 +72,11 @@ let lastVoiceAt = 0;
 let loudSince = 0;
 let segmentShouldSend = false;
 let activeRequestController = null;
+let interruptedRequestController = null;
+let activeTurnId = null;
+let bargeInTimer = null;
+let bargeInMonitoring = false;
+let bargeInPcmChunks = [];
 
 const VAD_INTERVAL_MS = 80;
 const VAD_START_RMS = 0.045;
@@ -46,61 +84,493 @@ const VAD_STOP_RMS = 0.028;
 const VAD_START_HOLD_MS = 140;
 const VAD_SILENCE_MS = 850;
 const VAD_MAX_SEGMENT_MS = 12000;
+const BARGE_IN_START_RMS = 0.075;
+const BARGE_IN_HOLD_MS = 260;
+const BARGE_IN_PREROLL_CHUNKS = 6;
+// A measured relay path adds about 0.5 s round-trip latency. Keep this wait
+// bounded, while allowing its first decodable video packet to arrive.
+const STREAM_AVATAR_FIRST_FRAME_WAIT_MS = 2000;
+const bargeInGate = new globalThis.BargeInGate({
+  threshold: BARGE_IN_START_RMS,
+  voicedMs: BARGE_IN_HOLD_MS,
+  sampleMs: VAD_INTERVAL_MS,
+});
 
-const avatarImage = document.querySelector("#avatarImage");
-function classifyAvatarImage() {
-  avatarStage.classList.toggle("portrait-photo", avatarImage.naturalHeight > avatarImage.naturalWidth * 1.1);
+let historyRecords = [];
+
+function scrollHistoryToLatest() {
+  if (!chatHistory) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      chatHistory.scrollTop = chatHistory.scrollHeight;
+    });
+  });
 }
-if (avatarImage.complete) classifyAvatarImage();
-avatarImage.addEventListener("load", classifyAvatarImage);
 
-function setStatus(message, state = "") {
+function historyMessage(className, speaker, text) {
+  const message = document.createElement("div");
+  message.className = `chat-message ${className}`;
+  const label = document.createElement("span");
+  label.className = "chat-speaker";
+  label.textContent = speaker;
+  const content = document.createElement("p");
+  content.textContent = text || "（没有文字）";
+  message.append(label, content);
+  return message;
+}
+
+function formatHistoryTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function renderHistory() {
+  if (!chatHistory) return;
+  chatHistory.replaceChildren();
+  const visibleRecords = historyRecords.filter((record) => (
+    String(record?.user_text || "").trim() || String(record?.assistant_text || "").trim()
+  ));
+  if (!visibleRecords.length) {
+    chatEmpty.hidden = false;
+    chatEmpty.textContent = "还没有对话，先和爸爸老师说一句吧。";
+    chatHistory.append(chatEmpty);
+    return;
+  }
+  chatEmpty.hidden = true;
+  for (const record of visibleRecords) {
+    const turn = document.createElement("article");
+    turn.className = "history-turn";
+    const timestamp = formatHistoryTime(record.created_at);
+    if (timestamp) {
+      const time = document.createElement("time");
+      time.className = "history-time";
+      time.dateTime = record.created_at;
+      time.textContent = timestamp;
+      turn.append(time);
+    }
+    turn.append(
+      historyMessage("child-message", "我", String(record.user_text || "").trim()),
+      historyMessage("dad-message", "爸爸老师", String(record.assistant_text || "").trim()),
+    );
+    chatHistory.append(turn);
+  }
+  scrollHistoryToLatest();
+}
+
+let historyResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(historyResizeTimer);
+  historyResizeTimer = setTimeout(scrollHistoryToLatest, 100);
+});
+
+function appendHistoryRecord(record) {
+  if (!record || typeof record !== "object") return;
+  const createdAt = String(record.created_at || "");
+  if (createdAt && historyRecords.some((item) => String(item?.created_at || "") === createdAt)) return;
+  historyRecords.push(record);
+  renderHistory();
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch("/api/memory/history");
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !Array.isArray(payload.history)) throw new Error("历史记录暂时无法加载");
+    historyRecords = payload.history.filter((record) => record && typeof record === "object");
+    renderHistory();
+  } catch (_) {
+    chatEmpty.hidden = false;
+    chatEmpty.textContent = "历史记录暂时无法加载，新的对话仍可继续。";
+    chatHistory?.replaceChildren(chatEmpty);
+  }
+}
+
+function resetLiveTurn() {
+  liveTurn.hidden = false;
+  userTextBox.textContent = "正在听你说…";
+  answerBox.classList.remove("has-answer");
+  answerBox.innerHTML = '<span class="answer-label">正在想一个好玩的教法…</span>';
+}
+
+function hideLiveTurn() {
+  liveTurn.hidden = true;
+}
+
+function setStatus(message, state = "idle") {
   statusText.textContent = message;
-  dot.classList.toggle("live", state === "live");
+  const visualState = ["idle", "listening", "thinking", "speaking", "offline"].includes(state) ? state : "idle";
+  if (avatarStage) avatarStage.dataset.state = visualState;
+  dot.classList.toggle("live", visualState !== "offline");
+  syncAvatarIdle(visualState);
+}
+
+function syncAvatarIdle(state = avatarStage?.dataset.state || "idle") {
+  if (!avatarIdle || !avatarImage || !avatarCanvas) return;
+  // Text can keep arriving while speech is playing. Keep its accepted canvas
+  // visible until the turn ends or flush revokes those frames.
+  const live = avatarAcceptFrames && !avatarCanvas.hidden
+    && ["speaking", "thinking"].includes(state);
+  if (!live) avatarCanvas.hidden = true;
+  const idle = !live && state !== "speaking" && avatarIdleReady && !avatarIdleFailed;
+  avatarIdle.hidden = !idle;
+  avatarImage.hidden = live || idle;
+  if (!idle || document.hidden || avatarReducedMotion.matches) {
+    avatarIdle.pause();
+    if (idle && avatarReducedMotion.matches && avatarIdle.currentTime !== 0) avatarIdle.currentTime = 0;
+    return;
+  }
+  if (avatarIdle.paused) {
+    avatarIdle.play()?.catch((error) => {
+      // A normal pause during handoff can abort an outstanding play promise.
+      if (error.name === "AbortError") return;
+      avatarIdleFailed = true;
+      syncAvatarIdle();
+    });
+  }
+}
+
+function initializeAvatarIdle() {
+  if (!avatarIdle) return;
+  avatarIdle.muted = true;
+  avatarIdle.addEventListener("loadeddata", () => {
+    if (!avatarIdleConfigured) return;
+    avatarIdleReady = true;
+    syncAvatarIdle();
+  });
+  avatarIdle.addEventListener("error", () => {
+    avatarIdleFailed = true;
+    syncAvatarIdle();
+  });
+  avatarReducedMotion.addEventListener("change", () => syncAvatarIdle());
+  document.addEventListener("visibilitychange", () => syncAvatarIdle());
+  window.addEventListener("pagehide", () => avatarIdle.pause());
+  if (avatarIdle.readyState >= 2) avatarIdleReady = true;
+  if (avatarIdle.error) avatarIdleFailed = true;
+  syncAvatarIdle();
+}
+
+function setAvatarIdleAvailable(available) {
+  if (!avatarIdle || avatarIdleConfigured === available) return;
+  avatarIdleConfigured = available;
+  avatarIdleReady = false;
+  avatarIdleFailed = false;
+  if (available) {
+    avatarIdle.src = "/api/avatar/idle";
+  } else {
+    avatarIdle.pause();
+    avatarIdle.removeAttribute("src");
+  }
+  avatarIdle.load();
+  syncAvatarIdle();
 }
 
 function setBusy(busy) {
   recordButton.disabled = busy && !conversationActive;
   textForm.querySelector("button").disabled = busy;
   textInput.disabled = busy;
+  for (const button of activityButtons) button.disabled = busy;
 }
 
-function setMouth(state) {
-  mouth.classList.remove("mouth-closed", "mouth-half", "mouth-open");
-  mouth.classList.add(`mouth-${state}`);
+function activityEnabled(name) {
+  return enabledActivities.has(name);
 }
 
-function stopMouthLoop() {
-  if (mouthFrame) cancelAnimationFrame(mouthFrame);
-  mouthFrame = null;
-  mouthEnergy = 0;
-  avatarStage.classList.remove("speaking");
-  setMouth("closed");
+function setAvatarState(message) {
+  if (avatarStateText) avatarStateText.textContent = message;
 }
 
-function updateMouth() {
-  if (!analyser || !activeAudio || activeAudio.paused || activeAudio.ended) {
-    stopMouthLoop();
+function markAvatarFrame() {
+  if (avatarStateText && !avatarCanvas.hidden
+      && avatarStateText.textContent !== "准备好啦，可以一起说话") {
+    setAvatarState("准备好啦，可以一起说话");
+  }
+  avatarFrameSerial += 1;
+  const pending = [];
+  for (const waiter of avatarFrameWaiters) {
+    if (avatarFrameSerial > waiter.afterSerial) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(true);
+    } else {
+      pending.push(waiter);
+    }
+  }
+  avatarFrameWaiters = pending;
+}
+
+function waitForAvatarFrame(afterSerial, timeoutMs = 1500) {
+  if (avatarFrameSerial > afterSerial) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const waiter = { afterSerial, resolve, timer: null };
+    waiter.timer = setTimeout(() => {
+      avatarFrameWaiters = avatarFrameWaiters.filter((item) => item !== waiter);
+      resolve(false);
+    }, timeoutMs);
+    avatarFrameWaiters.push(waiter);
+  });
+}
+
+function cancelAvatarFrameWaiters() {
+  const waiters = avatarFrameWaiters;
+  avatarFrameWaiters = [];
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timer);
+    waiter.resolve(false);
+  }
+}
+
+function avatarWebSocketUrl() {
+  const url = new URL("/ws/avatar", window.location.href);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+async function drawAvatarFrame(blob, generation = avatarFrameGeneration) {
+  if (!avatarCanvas || !avatarImage || !avatarAcceptFrames || generation !== avatarFrameGeneration) return;
+  if (avatarDrawing) return;
+  avatarDrawing = true;
+  try {
+    const context = avatarCanvas.getContext("2d", { alpha: false });
+    if (window.createImageBitmap) {
+      const bitmap = await createImageBitmap(blob);
+      try {
+        if (!avatarAcceptFrames || generation !== avatarFrameGeneration) return;
+        context.drawImage(bitmap, 0, 0, avatarCanvas.width, avatarCanvas.height);
+      } finally {
+        bitmap.close();
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      try {
+        const frame = new Image();
+        frame.src = url;
+        await frame.decode();
+        if (!avatarAcceptFrames || generation !== avatarFrameGeneration) return;
+        context.drawImage(frame, 0, 0, avatarCanvas.width, avatarCanvas.height);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+    avatarCanvas.hidden = false;
+    avatarImage.hidden = true;
+    syncAvatarIdle();
+    markAvatarFrame();
+  } catch (_) {
+    // Keep the last good frame or photographic fallback when one JPEG is bad.
+  } finally {
+    avatarDrawing = false;
+  }
+}
+
+function showDecodedAvatarFrame(frame) {
+  if (!avatarCanvas || !avatarImage || !avatarAcceptFrames) {
+    frame.close();
     return;
   }
-  const timeData = new Uint8Array(analyser.fftSize);
-  const freqData = new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteTimeDomainData(timeData);
-  analyser.getByteFrequencyData(freqData);
-  let square = 0;
-  for (const value of timeData) {
-    const centered = (value - 128) / 128;
-    square += centered * centered;
+  try {
+    const context = avatarCanvas.getContext("2d", { alpha: false });
+    context.drawImage(frame, 0, 0, avatarCanvas.width, avatarCanvas.height);
+    avatarCanvas.hidden = false;
+    avatarImage.hidden = true;
+    syncAvatarIdle();
+    markAvatarFrame();
+  } finally {
+    frame.close();
   }
-  const rms = Math.sqrt(square / timeData.length);
-  let sum = 0;
-  for (const value of freqData) sum += value;
-  const frequencyEnergy = freqData.length ? sum / freqData.length / 255 : 0;
-  const energy = rms * 1.7 + frequencyEnergy * 0.45;
-  mouthEnergy = mouthEnergy * 0.62 + energy * 0.38;
-  setMouth(mouthEnergy >= 0.14 ? "open" : mouthEnergy >= 0.045 ? "half" : "closed");
-  avatarStage.classList.add("speaking");
-  mouthFrame = requestAnimationFrame(updateMouth);
+}
+
+function ensureAvatarDecoder() {
+  if (avatarDecoder?.state === "configured") return true;
+  if (!window.VideoDecoder || !window.EncodedVideoChunk) {
+    setAvatarState("浏览器不支持动作，声音仍可用");
+    return false;
+  }
+  avatarNeedsKeyframe = true;
+  if (!avatarDecoder || avatarDecoder.state === "closed") avatarDecoder = new VideoDecoder({
+    output: showDecodedAvatarFrame,
+    error: () => {
+      avatarNeedsKeyframe = true;
+      setAvatarState("爸爸老师正在跟上声音");
+    },
+  });
+  avatarDecoder.configure({
+    codec: "avc1.42E01E",
+    codedWidth: 512,
+    codedHeight: 512,
+    hardwareAcceleration: "prefer-hardware",
+    optimizeForLatency: true,
+  });
+  return true;
+}
+
+function pumpAvatarVideo() {
+  avatarPumpTimer = null;
+  if (!avatarEncodedQueue.length || !ensureAvatarDecoder()) return;
+  const next = avatarEncodedQueue.shift();
+  if (avatarNeedsKeyframe && !next.key) {
+    avatarPumpTimer = setTimeout(pumpAvatarVideo, 0);
+    return;
+  }
+  try {
+    avatarDecoder.decode(new EncodedVideoChunk({
+      type: next.key ? "key" : "delta",
+      timestamp: next.timestamp,
+      data: next.data,
+    }));
+    avatarNeedsKeyframe = false;
+  } catch (_) {
+    avatarNeedsKeyframe = true;
+  }
+  avatarPumpTimer = setTimeout(pumpAvatarVideo, 40);
+}
+
+function queueEncodedAvatarFrame(frame) {
+  if (!avatarAcceptFrames) return;
+  avatarEncodedQueue.push(frame);
+  if (avatarEncodedQueue.length > 50) {
+    const latestKeyframe = avatarEncodedQueue.findLastIndex((item) => item.key);
+    avatarEncodedQueue = latestKeyframe > 0
+      ? avatarEncodedQueue.slice(latestKeyframe)
+      : avatarEncodedQueue.slice(-25);
+    avatarNeedsKeyframe = true;
+  }
+  if (!avatarPumpTimer) pumpAvatarVideo();
+}
+
+async function receiveAvatarBinary(blob) {
+  if (!avatarAcceptFrames) return;
+  const generation = avatarFrameGeneration;
+  const buffer = await blob.arrayBuffer();
+  if (!avatarAcceptFrames || generation !== avatarFrameGeneration) return;
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const h264 = bytes.length >= 6
+    && bytes[0] === 70 && bytes[1] === 65 && bytes[2] === 84
+    && bytes[3] === 86 && bytes[4] === 49;
+  if (!h264) {
+    await drawAvatarFrame(blob, generation);
+    return;
+  }
+  let offset = 6;
+  const count = view.getUint8(5);
+  for (let index = 0; index < count; index += 1) {
+    if (offset + 13 > buffer.byteLength) return;
+    const key = view.getUint8(offset) === 1;
+    const timestamp = Number(view.getBigUint64(offset + 1, false));
+    const length = view.getUint32(offset + 9, false);
+    offset += 13;
+    if (offset + length > buffer.byteLength) return;
+    const data = new Uint8Array(buffer.slice(offset, offset + length));
+    offset += length;
+    queueEncodedAvatarFrame({ key, timestamp, data });
+  }
+}
+
+function scheduleAvatarReconnect() {
+  if (avatarReconnectTimer) return;
+  avatarReconnectTimer = setTimeout(() => {
+    avatarReconnectTimer = null;
+    connectAvatar();
+  }, avatarReconnectDelayMs);
+  avatarReconnectDelayMs = Math.min(10000, Math.round(avatarReconnectDelayMs * 1.7));
+}
+
+function connectAvatar() {
+  if (avatarSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(avatarSocket.readyState)) return;
+  setAvatarState("爸爸老师正在准备");
+  const socket = new WebSocket(avatarWebSocketUrl());
+  avatarSocket = socket;
+  socket.binaryType = "blob";
+  socket.addEventListener("message", (event) => {
+    if (avatarSocket !== socket) return;
+    if (event.data instanceof Blob) {
+      void receiveAvatarBinary(event.data);
+      return;
+    }
+    try {
+      const payload = JSON.parse(String(event.data));
+      if (payload.type === "ready") {
+        avatarReady = true;
+        avatarReconnectDelayMs = 1200;
+        setAvatarState("准备好啦，可以一起说话");
+      } else if (payload.type === "error") {
+        avatarReady = false;
+        avatarAcceptFrames = false;
+        cancelAvatarFrameWaiters();
+        // Reuse the close handler's decoder cleanup and bounded reconnect.
+        // An open socket is not proof that the renderer can produce frames.
+        socket.close();
+        setAvatarState("动作暂时离线，声音仍可用");
+      }
+    } catch (_) {
+      // Ignore unknown diagnostic messages from the renderer.
+    }
+  });
+  socket.addEventListener("close", () => {
+    if (avatarSocket !== socket) return;
+    avatarSocket = null;
+    avatarFrameGeneration++;
+    avatarReady = false;
+    avatarAcceptFrames = false;
+    avatarEncodedQueue = [];
+    avatarNeedsKeyframe = true;
+    if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
+    avatarPumpTimer = null;
+    if (avatarDecoder?.state === "configured") avatarDecoder.reset();
+    cancelAvatarFrameWaiters();
+    syncAvatarIdle();
+    setAvatarState("动作暂时离线，声音仍可用");
+    scheduleAvatarReconnect();
+  });
+  socket.addEventListener("error", () => socket.close());
+}
+
+function sendAvatarEvent(payload) {
+  if (!avatarReady || avatarSocket?.readyState !== WebSocket.OPEN) return false;
+  try {
+    avatarSocket.send(JSON.stringify(payload));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function flushAvatar() {
+  avatarFrameGeneration++;
+  avatarAcceptFrames = false;
+  avatarEncodedQueue = [];
+  avatarNeedsKeyframe = true;
+  if (avatarDecoder?.state === "configured") avatarDecoder.reset();
+  avatarCanvas.hidden = true;
+  syncAvatarIdle("idle");
+  sendAvatarEvent({ type: "flush" });
+}
+
+function cueAvatar(payload) {
+  if (!avatarReady || avatarSocket?.readyState !== WebSocket.OPEN) {
+    avatarAcceptFrames = false;
+    return 0;
+  }
+  if (payload?.avatar_cued) {
+    avatarAcceptFrames = true;
+    const remoteLead = Number(payload.avatar_audio_lead_ms);
+    return Number.isFinite(remoteLead)
+      ? Math.max(0, Math.min(1500, remoteLead))
+      : avatarAudioLeadMs;
+  }
+  if (!payload?.avatar_pcm_base64) return 0;
+  const isFirstChunk = Number(payload.sequence || 1) === 1;
+  if (isFirstChunk) flushAvatar();
+  avatarAcceptFrames = true;
+  const sent = sendAvatarEvent({ type: "audio", pcm: payload.avatar_pcm_base64 });
+  if (!sent) avatarAcceptFrames = false;
+  return sent && isFirstChunk ? avatarAudioLeadMs : 0;
 }
 
 function resolveQueueWaiters() {
@@ -110,18 +580,42 @@ function resolveQueueWaiters() {
   for (const resolve of waiters) resolve();
 }
 
-function waitForAudioQueue() {
-  if (!queueDraining && !audioQueue.length) return Promise.resolve();
-  return new Promise((resolve) => queueDrainWaiters.push(resolve));
+async function waitForAudioQueue() {
+  const generation = queueGeneration;
+  const streamSession = typeof streamingPlayback !== "undefined" ? streamingPlayback : null;
+  if (queueDraining || audioQueue.length) {
+    await new Promise((resolve) => queueDrainWaiters.push(resolve));
+  }
+  if (generation !== queueGeneration) return;
+  if (queuePlaybackError) throw queuePlaybackError;
+  if (streamSession && streamSession.generation === generation) {
+    streamSession.finishInput();
+    try {
+      await streamSession.player.drain();
+    } catch (_) {
+      if (generation === queueGeneration) {
+        queuePlaybackError = new Error("声音没有播放成功，请让大人检查声音后再试一次");
+        throw queuePlaybackError;
+      }
+    }
+  }
 }
 
 function clearResponseQueue() {
   audioQueue = [];
   queueGeneration += 1;
+  queuePlaybackError = null;
+  if (typeof streamingPlayback !== "undefined" && streamingPlayback) {
+    streamingPlayback.player.cancel();
+    streamingPlayback = null;
+  }
+  cancelAvatarFrameWaiters();
   resolveQueueWaiters();
 }
 
 function cancelPlayback() {
+  flushAvatar();
+  if (typeof streamingPlayback !== "undefined" && streamingPlayback) streamingPlayback.player.cancel();
   if (activePlayback) {
     activePlayback.finish();
     return;
@@ -136,11 +630,10 @@ function cancelPlayback() {
     URL.revokeObjectURL(activeAudioUrl);
     activeAudioUrl = null;
   }
-  analyser = null;
-  stopMouthLoop();
 }
 
-async function playAudioPayload(payload) {
+async function playAudioPayload(payload, generation) {
+  if (generation !== queueGeneration) return;
   const binary = atob(payload.audio_base64);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -148,15 +641,58 @@ async function playAudioPayload(payload) {
   activeAudioUrl = URL.createObjectURL(blob);
   const audio = new Audio(activeAudioUrl);
   activeAudio = audio;
-  audioContext = audioContext || new AudioContext();
-  await audioContext.resume();
-  const source = audioContext.createMediaElementSource(audio);
-  const outputAnalyser = audioContext.createAnalyser();
-  analyser = outputAnalyser;
-  outputAnalyser.fftSize = 256;
-  source.connect(outputAnalyser);
-  outputAnalyser.connect(audioContext.destination);
   const activeAudioUrlForPlayback = activeAudioUrl;
+  const frameSerialAtCue = avatarFrameSerial;
+  const syncStartedAt = performance.now();
+  const leadMs = cueAvatar(payload);
+  // Register the frame waiter before asking the remote renderer to start.
+  // Later sentences may already be synthesized, but must not animate ahead
+  // of the sentence the child is actually hearing.
+  const pendingCue = Boolean(payload?.avatar_pending && payload?.turn_id);
+  if (pendingCue && avatarReady) avatarAcceptFrames = true;
+  const shouldSynchronizeAvatar = avatarReady
+    && Boolean(pendingCue || payload?.avatar_cued || payload?.avatar_pcm_base64);
+  // Remote TTS and SoulX are co-located, but the first video keyframe still
+  // crosses the private tunnel. Allow the measured tail without making the
+  // slower local fallback hold speech any longer.
+  // Playback-owned cues include the remote round trip in this budget; the
+  // legacy 2.2 s budget started only after that round trip had completed.
+  const frameWaitMs = pendingCue ? 3200 : payload?.avatar_cued ? 2200 : 1500;
+  const framePromise = shouldSynchronizeAvatar
+    ? waitForAvatarFrame(frameSerialAtCue, frameWaitMs)
+    : Promise.resolve(false);
+  if (pendingCue && avatarReady) {
+    void fetch(`/api/conversation/turns/${encodeURIComponent(payload.turn_id)}/avatar/${payload.sequence}`, {
+      method: "POST",
+      signal: AbortSignal.timeout(frameWaitMs),
+    }).then(async (response) => {
+      const cue = response.ok ? await response.json() : null;
+      if (!cue?.cued && generation === queueGeneration && activeAudio === audio) cancelAvatarFrameWaiters();
+    }).catch(() => {
+      if (generation === queueGeneration && activeAudio === audio) cancelAvatarFrameWaiters();
+    });
+  }
+  const frameSynchronized = await framePromise;
+  const elapsedSyncMs = performance.now() - syncStartedAt;
+  if (shouldSynchronizeAvatar && !frameSynchronized) {
+    flushAvatar();
+    avatarCanvas.hidden = true;
+    avatarImage.hidden = false;
+    setAvatarState("声音先开始，动作稍后恢复");
+  }
+  if (!frameSynchronized && leadMs > elapsedSyncMs) {
+    await new Promise((resolve) => setTimeout(resolve, leadMs - elapsedSyncMs));
+  }
+  if (generation !== queueGeneration) {
+    if (activeAudio === audio) activeAudio = null;
+    if (activeAudioUrl === activeAudioUrlForPlayback) {
+      URL.revokeObjectURL(activeAudioUrlForPlayback);
+      activeAudioUrl = null;
+    }
+    audio.removeAttribute("src");
+    audio.load();
+    return;
+  }
   const playbackPromise = new Promise((resolve, reject) => {
     let settled = false;
     const onEnded = () => finish();
@@ -166,9 +702,6 @@ async function playAudioPayload(payload) {
       settled = true;
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
-      try { source.disconnect(); } catch (_) { /* already disconnected */ }
-      try { outputAnalyser.disconnect(); } catch (_) { /* already disconnected */ }
-      if (analyser === outputAnalyser) analyser = null;
       if (activeAudio === audio) activeAudio = null;
       if (activeAudioUrl === activeAudioUrlForPlayback) {
         URL.revokeObjectURL(activeAudioUrlForPlayback);
@@ -178,14 +711,13 @@ async function playAudioPayload(payload) {
       audio.removeAttribute("src");
       audio.load();
       if (activePlayback?.audio === audio) activePlayback = null;
-      stopMouthLoop();
       if (error) reject(error);
       else resolve();
     };
     activePlayback = { audio, finish };
     audio.addEventListener("ended", onEnded, { once: true });
     audio.addEventListener("error", onError, { once: true });
-    audio.play().then(updateMouth).catch(finish);
+    audio.play().catch(finish);
   });
   await playbackPromise;
 }
@@ -198,9 +730,13 @@ async function drainResponseQueue() {
     while (audioQueue.length && generation === queueGeneration) {
       const payload = audioQueue.shift();
       try {
-        await playAudioPayload(payload);
+        await playAudioPayload(payload, generation);
       } catch (_) {
-        // A browser playback error should not strand the continuous listener.
+        if (generation === queueGeneration) {
+          queuePlaybackError = new Error("声音没有播放成功，请让大人检查声音后再试一次");
+          audioQueue = [];
+          cancelPlayback();
+        }
       }
     }
   } finally {
@@ -210,7 +746,12 @@ async function drainResponseQueue() {
   }
 }
 
-function enqueueAudio(payload) {
+function enqueueAudio(payload, generation = queueGeneration) {
+  if (generation !== queueGeneration || queuePlaybackError) return;
+  if (payload.audio_stream) {
+    enqueueStreamingAudio(payload);
+    return;
+  }
   audioQueue.push(payload);
   void drainResponseQueue();
 }
@@ -220,6 +761,98 @@ async function playResponse(payload) {
   cancelPlayback();
   enqueueAudio(payload);
   await waitForAudioQueue();
+}
+
+async function prepareStreamingAudio() {
+  if (typeof globalThis.StreamingPcmPlayer !== "function") return false;
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) return false;
+  try {
+    if (audioContext && audioContext.state !== "closed") streamingAudioContext = audioContext;
+    if (!streamingAudioContext || streamingAudioContext.state === "closed") {
+      streamingAudioContext = new Context();
+    }
+    if (streamingAudioContext.state !== "running") await streamingAudioContext.resume();
+    return streamingAudioContext.state === "running";
+  } catch (_) {
+    return false;
+  }
+}
+
+function enqueueStreamingAudio(payload) {
+  if (!streamingAudioContext || typeof globalThis.StreamingPcmPlayer !== "function") {
+    queuePlaybackError = new Error("声音没有播放成功，请让大人检查声音后再试一次");
+    return;
+  }
+  const generation = queueGeneration;
+  if (!streamingPlayback) {
+    let releaseStart;
+    const startGate = new Promise((resolve) => { releaseStart = resolve; });
+    const session = {
+      generation,
+      player: null,
+      duration: 0,
+      sequence: 0,
+      synchronized: false,
+      avatarEnabled: avatarReady && avatarSocket?.readyState === WebSocket.OPEN,
+      frameSerial: avatarFrameSerial,
+      finishInput: null,
+    };
+    const beginSync = () => {
+      if (session.synchronized) return;
+      session.synchronized = true;
+      if (!session.avatarEnabled || generation !== queueGeneration) {
+        releaseStart();
+        return;
+      }
+      // SoulX needs about 0.96 s of PCM before it can produce its first frame.
+      // Send chunks on arrival, but wait for the first frame only once per turn.
+      void waitForAvatarFrame(session.frameSerial, STREAM_AVATAR_FIRST_FRAME_WAIT_MS).then((ready) => {
+        if (generation !== queueGeneration) { releaseStart(); return; }
+        if (!ready) {
+          session.avatarEnabled = false;
+          flushAvatar();
+          avatarCanvas.hidden = true;
+          avatarImage.hidden = false;
+          setAvatarState("声音先开始，动作稍后恢复");
+        }
+        releaseStart();
+      }).catch(() => releaseStart());
+    };
+    session.player = new globalThis.StreamingPcmPlayer(streamingAudioContext, {
+      startGate,
+      onDecoded(buffer) {
+        session.duration += buffer.duration;
+        if (session.duration >= 0.96) beginSync();
+      },
+      onEvent(detail) {
+        window.dispatchEvent(new CustomEvent("family-audio-playback", {
+          detail: { ...detail, generation, transport: "web-audio" },
+        }));
+      },
+    });
+    session.finishInput = beginSync;
+    streamingPlayback = session;
+    if (!session.avatarEnabled) beginSync();
+  }
+  const session = streamingPlayback;
+  if (session.generation !== generation || session.player.cancelled || session.player.error) return;
+  const sequence = Number(payload.sequence);
+  if (Number.isInteger(sequence) && sequence > 0 && sequence <= session.sequence) return;
+  if (!Number.isInteger(sequence) || sequence !== session.sequence + 1) {
+    session.player.fail(new Error("The audio stream has a missing or invalid segment"));
+    return;
+  }
+  session.sequence = sequence;
+  try {
+    const binary = atob(payload.audio_base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    if (session.avatarEnabled) cueAvatar(payload);
+    session.player.enqueue(bytes.buffer);
+  } catch (error) {
+    session.player.fail(error);
+  }
 }
 
 async function consumeSse(response, onEvent) {
@@ -252,72 +885,164 @@ async function consumeSse(response, onEvent) {
   if (buffer.trim()) consumeFrame(buffer);
 }
 
+function createConversationTurnId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `turn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function cancelConversationTurn(turnId) {
+  if (!turnId) return Promise.resolve();
+  return fetch(`/api/conversation/turns/${encodeURIComponent(turnId)}/cancel`, {
+    method: "POST",
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
+async function completeConversationTurn(turnId) {
+  const response = await fetch(`/api/conversation/turns/${encodeURIComponent(turnId)}/complete`, {
+    method: "POST",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.detail || "这次回答还没有完整结束");
+  return payload;
+}
+
 async function sendStreamingRequest({ endpoint, body, continuous = false }) {
+  if (activeRequestController) return { ok: false, busy: true };
   setBusy(true);
-  setStatus("正在听清楚你说的话…");
-  answerBox.classList.remove("has-answer");
-  answerBox.innerHTML = '<span class="answer-label">爸爸老师正在准备回答…</span>';
+  setStatus("正在听清楚你说的话…", "thinking");
+  resetLiveTurn();
   clearResponseQueue();
   cancelPlayback();
+  const playbackGeneration = queueGeneration;
   const controller = new AbortController();
+  const turnId = createConversationTurnId();
   activeRequestController = controller;
+  activeTurnId = turnId;
+  if (continuous) startBargeInMonitor();
   let assistantText = "";
   let streamError = null;
+  let commitRequired = false;
+  let turnCommitted = false;
+  let receivedDone = false;
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: body instanceof FormData
-        ? undefined
-        : body instanceof Blob
-          ? { "Content-Type": body.type || "image/jpeg" }
-          : { "Content-Type": "application/json" },
-      body,
-      signal: controller.signal,
-    });
-    await consumeSse(response, (event) => {
-      if (event.event === "user_text") {
-        if (userTextBox) userTextBox.textContent = event.text || "刚刚说了一句话";
-      } else if (event.event === "assistant_delta") {
-        assistantText += event.text || "";
-        answerBox.classList.add("has-answer");
-        answerBox.textContent = assistantText;
-        setStatus("爸爸老师正在想一想…", "live");
-      } else if (event.event === "audio") {
-        setStatus("爸爸老师正在说话…", "live");
-        enqueueAudio(event);
-      } else if (event.event === "vision_context") {
-        setStatus("爸爸老师看到了刚才的画面…", "live");
-        if (visionResult) {
-          visionResult.hidden = false;
-          visionResult.textContent = event.description || "爸爸看到了刚才的画面";
-        }
-      } else if (event.event === "done") {
-        assistantText = event.assistant_text || assistantText;
-        if (assistantText) {
+    const audioStreaming = typeof prepareStreamingAudio === "function" && await prepareStreamingAudio();
+    let observationRequest = "";
+    for (let captureAttempt = 0; captureAttempt < 2; captureAttempt++) {
+      observationRequest = "";
+      const headers = { "X-Conversation-Turn-Id": turnId, "X-Avatar-Playback-Cues": "1" };
+      if (audioStreaming) headers["X-Audio-Streaming"] = "1";
+      if (!(body instanceof FormData)) {
+        headers["Content-Type"] = body instanceof Blob ? body.type || "image/jpeg" : "application/json";
+      }
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body,
+        signal: controller.signal,
+      });
+      await consumeSse(response, (event) => {
+        if (controller.signal.aborted) return;
+        if (event.event === "vision_request") {
+          observationRequest = event.text || "";
+        } else if (event.event === "user_text") {
+          if (userTextBox) userTextBox.textContent = event.text || "刚刚说了一句话";
+        } else if (event.event === "assistant_delta") {
+          assistantText += event.text || "";
           answerBox.classList.add("has-answer");
           answerBox.textContent = assistantText;
+          setStatus("爸爸老师正在想一想…", "thinking");
+        } else if (event.event === "audio") {
+          setStatus(
+            avatarReady ? "爸爸老师正在说话…" : "爸爸老师正在说话 · 动作暂时离线",
+            "speaking",
+          );
+          enqueueAudio(event, playbackGeneration);
+        } else if (event.event === "vision_context") {
+          setStatus("爸爸老师看到了刚才的画面…", "thinking");
+          if (visionResult) {
+            visionResult.hidden = false;
+            visionResult.textContent = event.description || "爸爸看到了刚才的画面";
+          }
+        } else if (event.event === "done") {
+          receivedDone = true;
+          assistantText = event.assistant_text || assistantText;
+          commitRequired = Boolean(event.commit_required);
+          if (assistantText) {
+            answerBox.classList.add("has-answer");
+            answerBox.textContent = assistantText;
+          }
+          if (event.history && assistantText) {
+            appendHistoryRecord(event.history);
+            turnCommitted = true;
+          }
+          if (event.ok === false) streamError = streamError || "回答没有完整生成";
+        } else if (event.event === "error") {
+          streamError = event.message || "本地服务暂时没有回应";
         }
-        if (event.ok === false) streamError = streamError || "回答没有完整生成";
-      } else if (event.event === "error") {
-        streamError = event.message || "本地服务暂时没有回应";
+      });
+      if (!observationRequest) break;
+      if (captureAttempt > 0) throw new Error("这次没看清，可以再给爸爸看一次");
+      const observed = new FormData();
+      observed.append("transcript", observationRequest);
+      observed.append("observation_attempted", "true");
+      if (!controller.signal.aborted && activityEnabled("vision_photo")) {
+        setStatus("你请爸爸看，现在拍一张…", "thinking");
+        captureState.textContent = "按你刚才的请求，拍一张";
+        try {
+          const frame = await makeFrameBlob();
+          if (!controller.signal.aborted) observed.append("frame", frame, "requested-frame.jpg");
+        } catch (_) {
+          cameraStatus.textContent = "这次没打开画面，我们继续说话";
+        }
       }
-    });
+      if (controller.signal.aborted) throw new DOMException("已取消", "AbortError");
+      endpoint = "/api/conversation/stream";
+      body = observed;
+    }
+    if (!receivedDone) throw new Error("连接中断，这次回答还没有完整结束");
+    if (streamError) throw new Error(streamError);
     await waitForAudioQueue();
+    if (controller.signal.aborted || playbackGeneration !== queueGeneration) {
+      throw new DOMException("这次回答已停止", "AbortError");
+    }
+    if (interruptedRequestController === controller) {
+      return { ok: false, interrupted: true };
+    }
     if (streamError) throw new Error(streamError);
     if (!assistantText) throw new Error("爸爸老师没有返回文字回答");
+    if (commitRequired) {
+      const completion = await completeConversationTurn(turnId);
+      if (interruptedRequestController === controller) {
+        return { ok: false, interrupted: true };
+      }
+      if (completion.history) appendHistoryRecord(completion.history);
+      turnCommitted = true;
+    }
+    hideLiveTurn();
+    stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
-    else setStatus("回答完成", "live");
+    else setStatus("回答完成", "idle");
     return { ok: true, assistantText };
   } catch (error) {
+    if (!turnCommitted) cancelPlayback();
+    if (!turnCommitted) void cancelConversationTurn(turnId);
+    if (interruptedRequestController === controller) {
+      return { ok: false, interrupted: true };
+    }
     if (error.name === "AbortError" && !conversationActive) return { ok: false, aborted: true };
     const message = error.message || "本地服务暂时没有回应";
-    setStatus("还没有准备好", "");
+    setStatus("还没有准备好", "offline");
     answerBox.classList.add("has-answer");
     answerBox.textContent = message;
+    liveTurn.hidden = false;
+    stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
     return { ok: false, error: message };
   } finally {
     if (activeRequestController === controller) activeRequestController = null;
+    if (interruptedRequestController === controller) interruptedRequestController = null;
+    if (activeTurnId === turnId) activeTurnId = null;
     setBusy(false);
   }
 }
@@ -336,12 +1061,6 @@ async function sendAudio(blob, continuous = false) {
   const form = new FormData();
   const extension = blob.type === "audio/wav" ? "wav" : "webm";
   form.append("audio", blob, `child-speech.${extension}`);
-  const frame = continuous && shouldAttachAutomaticFrame() ? automaticFrameBlob : null;
-  if (frame) {
-    form.append("frame", frame, "child-frame.jpg");
-    automaticFrameBlob = null;
-    automaticFrameAt = 0;
-  }
   await sendStreamingRequest({ endpoint: "/api/conversation/stream", body: form, continuous });
 }
 
@@ -350,6 +1069,50 @@ function stopVadLoop() {
   vadTimer = null;
   loudSince = 0;
   lastVoiceAt = 0;
+}
+
+function stopBargeInMonitor() {
+  if (bargeInTimer) clearTimeout(bargeInTimer);
+  bargeInTimer = null;
+  bargeInMonitoring = false;
+  bargeInGate.reset();
+  bargeInPcmChunks = [];
+}
+
+function scheduleBargeInCheck() {
+  if (!bargeInMonitoring || !conversationActive || segmentRecording) return;
+  if (bargeInTimer) clearTimeout(bargeInTimer);
+  bargeInTimer = setTimeout(checkBargeIn, VAD_INTERVAL_MS);
+}
+
+function startBargeInMonitor() {
+  if (!conversationActive || !inputAnalyser || segmentRecording) return;
+  stopBargeInMonitor();
+  bargeInMonitoring = true;
+  scheduleBargeInCheck();
+}
+
+function triggerBargeIn() {
+  if (!bargeInMonitoring || !conversationActive || segmentRecording) return;
+  const preRoll = bargeInPcmChunks.slice();
+  interruptedRequestController = activeRequestController;
+  void cancelConversationTurn(activeTurnId);
+  activeRequestController?.abort();
+  clearResponseQueue();
+  cancelPlayback();
+  stopBargeInMonitor();
+  beginContinuousSegment(preRoll, true);
+  recordHint.textContent = "我停下来听你说；说完停一下。";
+  setStatus("我在听，请继续说…", "listening");
+}
+
+function checkBargeIn() {
+  if (!bargeInMonitoring || !conversationActive || segmentRecording) return;
+  if (bargeInGate.update(inputRms(), performance.now())) {
+    triggerBargeIn();
+    return;
+  }
+  scheduleBargeInCheck();
 }
 
 function inputRms() {
@@ -431,14 +1194,17 @@ function pcmToWav(chunks, sampleRate) {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-function beginContinuousSegment() {
+function beginContinuousSegment(initialChunks = [], alreadySpeaking = false) {
   if (!conversationActive || !recordingStream || segmentRecording) return;
-  segmentPcmChunks = [];
+  stopBargeInMonitor();
+  segmentPcmChunks = initialChunks.slice();
   segmentRecording = true;
   segmentShouldSend = false;
-  speechStartedAt = 0;
+  speechStartedAt = alreadySpeaking ? performance.now() : 0;
+  lastVoiceAt = speechStartedAt;
+  loudSince = speechStartedAt;
   recordHint.textContent = "我会一直听；说完停一下，爸爸老师会回答。";
-  setStatus("我在听，请说话…", "live");
+  setStatus("我在听，请说话…", "listening");
   scheduleVad();
 }
 
@@ -456,13 +1222,14 @@ function finishContinuousSegment() {
     if (conversationActive) beginContinuousSegment();
     return;
   }
-  if (shouldSend) setStatus("听到了，正在准备回答…");
+  if (shouldSend) setStatus("听到了，正在准备回答…", "thinking");
   const blob = pcmToWav(chunks, inputSampleRate);
   void sendAudio(blob, true);
 }
 
 function releaseInputStream() {
   stopVadLoop();
+  stopBargeInMonitor();
   segmentRecording = false;
   segmentPcmChunks = [];
   if (inputProcessor) {
@@ -508,19 +1275,19 @@ async function startContinuousConversation() {
     inputMuteGain = audioContext.createGain();
     inputMuteGain.gain.value = 0;
     inputProcessor.onaudioprocess = (event) => {
-      if (!conversationActive || !segmentRecording) return;
-      segmentPcmChunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+      if (!conversationActive) return;
+      const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+      if (segmentRecording) {
+        segmentPcmChunks.push(chunk);
+      } else if (bargeInMonitoring) {
+        bargeInPcmChunks.push(chunk);
+        if (bargeInPcmChunks.length > BARGE_IN_PREROLL_CHUNKS) bargeInPcmChunks.shift();
+      }
     };
     inputSource.connect(inputProcessor);
     inputProcessor.connect(inputMuteGain);
     inputMuteGain.connect(audioContext.destination);
     conversationActive = true;
-    try {
-      await ensureCameraStream();
-    } catch (error) {
-      cameraStatus.textContent = `摄像头未打开：${error.message}`;
-    }
-    startAutomaticFrameTimer();
     beginContinuousSegment();
   } catch (error) {
     conversationActive = false;
@@ -532,22 +1299,22 @@ async function startContinuousConversation() {
   }
   recordButton.classList.add("recording");
   recordButton.setAttribute("aria-pressed", "true");
-  recordLabel.textContent = "结束持续交流";
+  recordLabel.textContent = "结束这次交流";
 }
 
 function stopContinuousConversation() {
   conversationActive = false;
   segmentShouldSend = false;
-  stopAutomaticFrameTimer();
+  void cancelConversationTurn(activeTurnId);
   activeRequestController?.abort();
   releaseInputStream();
   clearResponseQueue();
   cancelPlayback();
   recordButton.classList.remove("recording");
   recordButton.setAttribute("aria-pressed", "false");
-  recordLabel.textContent = "点一下开始交流";
-  recordHint.textContent = "已结束；点一下可以重新开始持续交流。";
-  setStatus("交流已结束", "");
+  recordLabel.textContent = "和爸爸老师说话";
+  recordHint.textContent = "这次交流结束了，想继续时再点一下。";
+  setStatus("休息一下，想聊时我还在", "idle");
 }
 
 recordButton.addEventListener("click", async () => {
@@ -558,7 +1325,7 @@ recordButton.addEventListener("click", async () => {
   try {
     await startContinuousConversation();
   } catch (error) {
-    setStatus("麦克风没有打开", "");
+    setStatus("麦克风没有打开", "idle");
     recordHint.textContent = error.message;
   }
 });
@@ -570,7 +1337,15 @@ textForm.addEventListener("submit", async (event) => {
   await sendText(text);
 });
 
+for (const button of activityButtons) {
+  button.addEventListener("click", async () => {
+    if (conversationActive) stopContinuousConversation();
+    await sendText(String(button.dataset.prompt || ""));
+  });
+}
+
 const cameraVideo = document.querySelector("#cameraVideo");
+const cameraToolbar = document.querySelector("#cameraToolbar");
 const cameraButton = document.querySelector("#cameraButton");
 const captureButton = document.querySelector("#captureButton");
 const recordVideoButton = document.querySelector("#recordVideoButton");
@@ -582,29 +1357,67 @@ const visionResult = document.querySelector("#visionResult");
 let cameraStream = null;
 let capturedUrl = null;
 let capturedBlob = null;
-let automaticFrameBlob = null;
-let automaticFrameAt = 0;
-let automaticFrameTimer = null;
 let videoRecorder = null;
 let videoChunks = [];
 let videoStopTimer = null;
-const AUTOMATIC_FRAME_INTERVAL_MS = 15000;
 const MANUAL_VIDEO_MAX_MS = 6000;
 
+async function loadChildProfileControls() {
+  try {
+    const response = await fetch("/api/profile", { cache: "no-store" });
+    const profile = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error("家庭设置暂时不可用");
+    childProfileLoaded = true;
+    enabledActivities = new Set(
+      Array.isArray(profile.enabled_activities) ? profile.enabled_activities : defaultEnabledActivities,
+    );
+    const nickname = String(profile.name || "").trim();
+    if (nickname) {
+      childWelcome.textContent = `${nickname}，爸爸老师在这里。`;
+      conversationTitle.textContent = `${nickname}，一起学，一起聊`;
+    } else {
+      childWelcome.textContent = "一起说、一起看、一起学。";
+      conversationTitle.textContent = "一起学，一起聊";
+    }
+  } catch (_) {
+    // A temporary network miss must not erase the last parent-approved controls.
+    if (!childProfileLoaded) enabledActivities = new Set(defaultEnabledActivities);
+    else return;
+  }
+  for (const button of activityButtons) {
+    button.hidden = !activityEnabled(String(button.dataset.activity || ""));
+  }
+  const activityRow = document.querySelector(".activity-row");
+  if (activityRow) activityRow.hidden = activityButtons.every((button) => button.hidden);
+  captureButton.hidden = !activityEnabled("vision_photo");
+  recordVideoButton.hidden = !activityEnabled("vision_video");
+  const visionEnabled = activityEnabled("vision_photo") || activityEnabled("vision_video");
+  cameraButton.hidden = !visionEnabled;
+  cameraToolbar.hidden = !visionEnabled;
+  if (!visionEnabled) {
+    captureState.textContent = "画面活动已由爸爸关闭";
+    cameraStatus.textContent = "今天只用声音交流";
+  }
+  setCameraActionState(Boolean(cameraStream?.active));
+}
+
 function setCameraActionState(open) {
-  captureButton.disabled = false;
-  recordVideoButton.disabled = !open || !window.MediaRecorder;
+  captureButton.disabled = !activityEnabled("vision_photo");
+  recordVideoButton.disabled = !activityEnabled("vision_video") || !open || !window.MediaRecorder;
   if (!videoRecorder || videoRecorder.state !== "recording") {
-    recordVideoButton.textContent = "🎥";
+    recordVideoButton.textContent = "▷";
     recordVideoButton.title = "录一小段给爸爸看";
     recordVideoButton.setAttribute("aria-label", "录一小段给爸爸看");
   }
-  cameraButton.textContent = open ? "⏹" : "📹";
+  cameraButton.textContent = open ? "■" : "◉";
   cameraButton.title = open ? "关闭摄像头" : "打开摄像头";
   cameraButton.setAttribute("aria-label", open ? "关闭摄像头" : "打开摄像头");
 }
 
 async function ensureCameraStream() {
+  if (!activityEnabled("vision_photo") && !activityEnabled("vision_video")) {
+    throw new Error("爸爸暂时关闭了画面活动，我们可以继续说话");
+  }
   if (cameraStream?.active) return cameraStream;
   if (!navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持摄像头");
   cameraStream = await navigator.mediaDevices.getUserMedia({
@@ -614,7 +1427,7 @@ async function ensureCameraStream() {
   cameraVideo.srcObject = cameraStream;
   await cameraVideo.play().catch(() => {});
   setCameraActionState(true);
-  cameraStatus.textContent = "摄像头已打开";
+  cameraStatus.textContent = "可以看到自己了";
   return cameraStream;
 }
 
@@ -636,7 +1449,7 @@ function stopCameraStream() {
   cameraStream = null;
   cameraVideo.srcObject = null;
   setCameraActionState(false);
-  cameraStatus.textContent = "摄像头已关闭";
+  cameraStatus.textContent = "摄像头已关好";
 }
 
 function blobFromCanvas(canvas) {
@@ -672,40 +1485,8 @@ async function makeFrameBlob() {
   return blob;
 }
 
-async function prepareAutomaticFrame() {
-  if (!conversationActive || !cameraStream?.active) return;
-  try {
-    automaticFrameBlob = await makeFrameBlob();
-    automaticFrameAt = Date.now();
-    cameraStatus.textContent = "自动准备了一帧 · 尚未上传";
-  } catch (error) {
-    cameraStatus.textContent = `自动取帧未完成：${error.message}`;
-  }
-}
-
-function startAutomaticFrameTimer() {
-  stopAutomaticFrameTimer();
-  automaticFrameTimer = setInterval(prepareAutomaticFrame, AUTOMATIC_FRAME_INTERVAL_MS);
-  void prepareAutomaticFrame();
-}
-
-function stopAutomaticFrameTimer() {
-  if (automaticFrameTimer) clearInterval(automaticFrameTimer);
-  automaticFrameTimer = null;
-  automaticFrameBlob = null;
-  automaticFrameAt = 0;
-}
-
-function shouldAttachAutomaticFrame() {
-  return Boolean(
-    conversationActive &&
-    automaticFrameBlob &&
-    automaticFrameAt &&
-    Date.now() - automaticFrameAt <= AUTOMATIC_FRAME_INTERVAL_MS * 1.5,
-  );
-}
-
 async function capture_frame() {
+  if (!activityEnabled("vision_photo")) throw new Error("爸爸暂时关闭了拍照活动");
   const blob = await makeFrameBlob();
   if (capturedUrl) URL.revokeObjectURL(capturedUrl);
   capturedUrl = URL.createObjectURL(blob);
@@ -716,7 +1497,7 @@ async function capture_frame() {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.detail || "截取失败");
   captureState.textContent = "照片已准备";
-  cameraStatus.textContent = `已拍照 ${payload.bytes} bytes`;
+  cameraStatus.textContent = "照片准备好了";
   return payload;
 }
 
@@ -770,6 +1551,7 @@ function supportedVideoMimeType() {
 }
 
 async function startVideoRecording() {
+  if (!activityEnabled("vision_video")) throw new Error("爸爸暂时关闭了短视频活动");
   if (!window.MediaRecorder) throw new Error("当前浏览器不支持短视频录制");
   await ensureCameraStream();
   if (!cameraStream?.active) throw new Error("请先打开摄像头");
@@ -790,7 +1572,7 @@ async function startVideoRecording() {
     videoChunks = [];
     videoRecorder = null;
     recordVideoButton.classList.remove("recording");
-    recordVideoButton.textContent = "🎥";
+    recordVideoButton.textContent = "▷";
     setCameraActionState(Boolean(cameraStream?.active));
     if (!clip.size) {
       cameraStatus.textContent = "没有录到画面";
@@ -816,7 +1598,7 @@ async function startVideoRecording() {
   };
   videoRecorder.start(250);
   recordVideoButton.classList.add("recording");
-  recordVideoButton.textContent = "⏹";
+  recordVideoButton.textContent = "■";
   recordVideoButton.title = "停止录制并给爸爸看";
   recordVideoButton.setAttribute("aria-label", "停止录制并给爸爸看");
   cameraStatus.textContent = "正在录制 · 最长6秒";
@@ -844,20 +1626,56 @@ recordVideoButton.addEventListener("click", async () => {
 setCameraActionState(false);
 
 async function checkHealth() {
+  const mayUpdateIdle = () => !conversationActive && !conversationStarting && !activeRequestController;
   try {
     const response = await fetch("/health");
     const payload = await response.json();
     if (!response.ok) throw new Error("本地服务不可用");
-    const configured = payload.llm_configured && payload.stt_ready && payload.tts_ready;
-    serviceBadge.textContent = configured ? "本地能力已就绪" : "还需配置 AI Station";
-    serviceBadge.classList.toggle("ready", configured);
-    serviceBadge.classList.toggle("warn", !configured);
-    setStatus(configured ? "可以开始说话" : "请先在 .env 配置 AI Station", configured ? "live" : "");
+    setAvatarIdleAvailable(payload.avatar_idle_ready === true);
+    const localReady = payload.stt_ready && payload.tts_ready;
+    const configured = payload.llm_configured && localReady;
+    if (Number.isFinite(Number(payload.avatar_audio_lead_ms))) {
+      avatarAudioLeadMs = Math.max(0, Math.min(1500, Number(payload.avatar_audio_lead_ms)));
+    }
+    const warming = payload.tts_warmup === "warming";
+    const voiceUncertain = ["failed", "retry_wait", "retrying"].includes(payload.tts_warmup);
+    serviceBadge.textContent = warming
+      ? "正在准备声音"
+      : voiceUncertain
+        ? "声音还没准备好，可以试着说话"
+        : configured
+        ? "准备好了"
+        : localReady ? "本地活动可以玩" : "需要家长设置";
+    serviceBadge.classList.toggle("ready", localReady && !warming && !voiceUncertain);
+    serviceBadge.classList.toggle("warn", !localReady || warming || voiceUncertain);
+    if (mayUpdateIdle()) setBusy(warming);
+    if (mayUpdateIdle()) {
+      setStatus(
+        warming ? "正在准备声音" : voiceUncertain ? "声音准备遇到问题，可以试着说话" : configured ? "我在这里，可以开始说话" : localReady ? "我们可以先玩画画、故事和数字" : "请家长检查声音设置",
+        warming ? "thinking" : voiceUncertain ? "offline" : localReady ? "idle" : "offline",
+      );
+    }
+    if (warming || ["retry_wait", "retrying"].includes(payload.tts_warmup)) setTimeout(checkHealth, 1800);
   } catch (error) {
     serviceBadge.textContent = "服务未启动";
     serviceBadge.classList.add("warn");
-    setStatus("请先启动本地服务", "");
+    if (mayUpdateIdle()) {
+      setStatus("请先启动本地服务", "offline");
+      setBusy(true);
+    }
+    setTimeout(checkHealth, 1800);
   }
 }
 
+initializeAvatarIdle();
 checkHealth();
+void loadHistory();
+void loadChildProfileControls();
+const childProfileRefreshTimer = window.setInterval(() => {
+  if (document.visibilityState === "visible") void loadChildProfileControls();
+}, 8000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void loadChildProfileControls();
+});
+window.addEventListener("pagehide", () => window.clearInterval(childProfileRefreshTimer), { once: true });
+connectAvatar();

@@ -8,8 +8,14 @@ __pycache__/
 data/child_profile.json
 data/session_history.jsonl
 data/learning_events.jsonl
+data/memories.json
+data/skill_graph.json
+data/parent_messages.json
+data/activity_state.json
 data/*.tmp
 runtime/
 output/
 *.log
 frontend/nathan-avatar.jpg
+frontend/nathan-avatar-neutral.png
+frontend/nathan-idle.mp4

@@ -8,7 +8,7 @@ $actionArguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Exec
 $action = New-ScheduledTaskAction -Execute $pwsh -Argument $actionArguments -WorkingDirectory $projectRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $principal = New-ScheduledTaskPrincipal -UserId $userSid -LogonType Interactive -RunLevel Limited
 

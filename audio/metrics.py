@@ -55,6 +55,18 @@ class GpuMeasurement:
     sample_count: int
 
 
+def unavailable_gpu_measurement() -> GpuMeasurement:
+    """Represent work performed outside the local NVIDIA GPU."""
+
+    return GpuMeasurement(
+        available=False,
+        start_mib=None,
+        peak_mib=None,
+        end_mib=None,
+        sample_count=0,
+    )
+
+
 class GpuMeter(Generic[T]):
     """Sample VRAM while a synchronous operation is running."""
 

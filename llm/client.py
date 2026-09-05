@@ -65,7 +65,12 @@ class OpenAICompatibleClient:
             content = message.get("reasoning_content", "")
         return str(content or "").strip()
 
-    def chat(self, messages: list[dict[str, Any]], max_tokens: int = 180) -> LLMResult:
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        max_tokens: int = 180,
+        timeout_seconds: float | None = None,
+    ) -> LLMResult:
         self._require_configured()
         payload = {
             "model": self.settings.llm_model,
@@ -77,7 +82,7 @@ class OpenAICompatibleClient:
         started = time.perf_counter()
         try:
             with httpx.Client(
-                timeout=self.settings.llm_timeout_seconds,
+                timeout=timeout_seconds or self.settings.llm_timeout_seconds,
                 trust_env=False,
             ) as client:
                 response = client.post(self._url("/chat/completions"), headers=self._headers(), json=payload)
@@ -179,7 +184,11 @@ class OpenAICompatibleClient:
                 "content": content,
             },
         ]
-        return self.chat(messages, max_tokens=max_tokens)
+        return self.chat(
+            messages,
+            max_tokens=max_tokens,
+            timeout_seconds=self.settings.llm_vision_timeout_seconds,
+        )
 
     def check_models(self) -> tuple[bool, float, str]:
         self._require_configured()

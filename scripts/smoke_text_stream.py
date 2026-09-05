@@ -21,6 +21,7 @@ def main() -> int:
     audio: list[dict[str, object]] = []
     done: dict[str, object] = {}
     started = time.perf_counter()
+    first_audio_s: float | None = None
     try:
         with httpx.stream(
             "POST",
@@ -38,15 +39,36 @@ def main() -> int:
                 if kind == "assistant_delta":
                     chars += len(str(event.get("text", "")))
                 elif kind == "audio":
-                    audio.append({"sequence": event.get("sequence"), "duration_s": event.get("audio_duration_s"), "gpu_peak_mib": (event.get("tts_gpu") or {}).get("peak_mib")})
+                    if first_audio_s is None:
+                        first_audio_s = round(time.perf_counter() - started, 3)
+                    audio.append(
+                        {
+                            "sequence": event.get("sequence"),
+                            "duration_s": event.get("audio_duration_s"),
+                            "tts_elapsed_s": event.get("tts_elapsed_s"),
+                            "backend": event.get("tts_backend"),
+                            "mime": event.get("audio_mime"),
+                            "avatar_cued": event.get("avatar_cued"),
+                            "avatar_lead_ms": event.get("avatar_audio_lead_ms"),
+                            "audio_base64_chars": len(str(event.get("audio_base64", ""))),
+                            "avatar_pcm_sent": bool(event.get("avatar_pcm_base64")),
+                            "gpu_peak_mib": (event.get("tts_gpu") or {}).get("peak_mib"),
+                        }
+                    )
                 elif kind == "error":
                     errors.append(str(event.get("message", ""))[:240])
                 elif kind == "done":
-                    done = {"ok": event.get("ok"), "audio_count": event.get("audio_count"), "llm_elapsed_s": event.get("llm_elapsed_s"), "total_elapsed_s": event.get("total_elapsed_s")}
+                    done = {
+                        "ok": event.get("ok"),
+                        "assistant_text": event.get("assistant_text"),
+                        "audio_count": event.get("audio_count"),
+                        "llm_elapsed_s": event.get("llm_elapsed_s"),
+                        "total_elapsed_s": event.get("total_elapsed_s"),
+                    }
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         print(json.dumps({"status": "FAIL", "reason": str(exc)[:240]}, ensure_ascii=True))
         return 1
-    payload = {"status": "PASS" if response.status_code == 200 and done.get("ok") and audio and not errors else "FAIL", "http": response.status_code, "events": dict(counts), "assistant_chars": chars, "audio": audio, "errors": errors, "done": done, "wall_s": round(time.perf_counter() - started, 3)}
+    payload = {"status": "PASS" if response.status_code == 200 and done.get("ok") and audio and not errors else "FAIL", "http": response.status_code, "events": dict(counts), "assistant_chars": chars, "first_audio_s": first_audio_s, "audio": audio, "errors": errors, "done": done, "wall_s": round(time.perf_counter() - started, 3)}
     print(json.dumps(payload, ensure_ascii=True))
     return 0 if payload["status"] == "PASS" else 1
 

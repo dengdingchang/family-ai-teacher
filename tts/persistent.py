@@ -11,11 +11,11 @@ import subprocess
 import threading
 import time
 import wave
-from collections import deque
+from collections import OrderedDict, deque
 from pathlib import Path
 
 from app.config import Settings
-from audio.metrics import GpuMeter
+from audio.metrics import GpuMeter, unavailable_gpu_measurement
 
 from .adapter import TTSAdapterError, TTSResult
 
@@ -39,11 +39,27 @@ class PersistentNathanTTSAdapter:
         self._stderr_tail: deque[str] = deque(maxlen=12)
         self._lock = threading.RLock()
         self._request_number = 0
+        self._audio_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
+        self._audio_cache_limit = 24
         atexit.register(self.shutdown)
 
     @property
     def ready(self) -> bool:
         return self.settings.tts_ready
+
+    def is_cached(self, text: str) -> bool:
+        """Return whether a normalized phrase can be played without model inference."""
+
+        clean = " ".join(str(text).strip().split())
+        if not clean:
+            return False
+        with self._lock:
+            return clean in self._audio_cache
+
+    @property
+    def cache_entries(self) -> int:
+        with self._lock:
+            return len(self._audio_cache)
 
     def _reference_text(self) -> str:
         if self.settings.tts_ref_text:
@@ -136,6 +152,8 @@ class PersistentNathanTTSAdapter:
             self.settings.tts_language,
             "--dtype",
             self.settings.tts_dtype,
+            "--prompt-mode",
+            self.settings.tts_prompt_mode,
         ]
         if self.settings.tts_cpu:
             command.append("--cpu")
@@ -211,7 +229,83 @@ class PersistentNathanTTSAdapter:
             raise TTSAdapterError("Nathan TTS daemon returned malformed audio") from exc
         return audio_bytes, duration_s
 
-    def synthesize(self, text: str) -> TTSResult:
+    def _request_batch(self, texts: list[str]) -> list[tuple[bytes, float]]:
+        process = self._ensure_process()
+        if process.stdin is None:
+            raise TTSAdapterError("Nathan TTS daemon has no stdin")
+        self._request_number += 1
+        request_id = str(self._request_number)
+        try:
+            process.stdin.write(json.dumps({"id": request_id, "texts": texts}) + "\n")
+            process.stdin.flush()
+            payload = json.loads(self._readline(process, self.settings.tts_timeout_seconds))
+        except (OSError, BrokenPipeError, json.JSONDecodeError) as exc:
+            self._close_process()
+            raise TTSAdapterError("Nathan TTS batch response was invalid") from exc
+        if str(payload.get("id", "")) != request_id:
+            self._close_process()
+            raise TTSAdapterError("Nathan TTS batch response id did not match the request")
+        if payload.get("event") == "error":
+            self._close_process()
+            detail = _compact_detail(str(payload.get("error", "unknown generation error")))
+            raise TTSAdapterError(f"Nathan TTS batch generation failed: {detail}")
+        items = payload.get("items")
+        if payload.get("event") != "audio_batch" or not isinstance(items, list) or len(items) != len(texts):
+            self._close_process()
+            raise TTSAdapterError("Nathan TTS daemon returned no audio batch")
+        decoded: list[tuple[bytes, float]] = []
+        try:
+            for item in items:
+                if not isinstance(item, dict):
+                    raise TypeError("invalid batch item")
+                decoded.append(
+                    (
+                        base64.b64decode(str(item["audio_base64"]), validate=True),
+                        float(item["duration_s"]),
+                    )
+                )
+        except (KeyError, ValueError, TypeError) as exc:
+            raise TTSAdapterError("Nathan TTS daemon returned malformed batch audio") from exc
+        return decoded
+
+    @staticmethod
+    def _validate_wav(audio_bytes: bytes, duration_s: float) -> None:
+        if not audio_bytes or duration_s <= 0:
+            raise TTSAdapterError("Nathan TTS returned empty audio")
+        try:
+            with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate()
+                if frames <= 0 or rate <= 0:
+                    raise TTSAdapterError("Nathan TTS returned an empty WAV")
+        except (OSError, wave.Error):
+            raise TTSAdapterError("Nathan TTS returned malformed WAV") from None
+
+    def prewarm(self, texts: list[str]) -> int:
+        """Generate missing RAM-cache phrases in batches capped at two."""
+
+        normalized = list(dict.fromkeys(" ".join(str(text).strip().split()) for text in texts))
+        normalized = [text for text in normalized if text]
+        with self._lock:
+            missing = [text for text in normalized if text not in self._audio_cache]
+            for index in range(0, len(missing), 2):
+                batch = missing[index : index + 2]
+                generated, _gpu = GpuMeter().run(lambda values=batch: self._request_batch(values))
+                for text, (audio_bytes, duration_s) in zip(batch, generated, strict=True):
+                    self._validate_wav(audio_bytes, duration_s)
+                    self._audio_cache[text] = (audio_bytes, round(duration_s, 3))
+                    self._audio_cache.move_to_end(text)
+                    while len(self._audio_cache) > self._audio_cache_limit:
+                        self._audio_cache.popitem(last=False)
+        return len(missing)
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        avatar_flush: bool = True,
+        defer_avatar: bool = False,
+    ) -> TTSResult:
         text = " ".join(text.strip().split())
         if not text:
             raise TTSAdapterError("TTS text is empty")
@@ -221,6 +315,17 @@ class PersistentNathanTTSAdapter:
             raise TTSAdapterError("Existing Nathan TTS runtime or model is not available")
         started = time.perf_counter()
         with self._lock:
+            cached = self._audio_cache.get(text)
+            if cached is not None:
+                self._audio_cache.move_to_end(text)
+                audio_bytes, duration_s = cached
+                return TTSResult(
+                    audio_bytes=audio_bytes,
+                    duration_s=duration_s,
+                    elapsed_s=round(time.perf_counter() - started, 3),
+                    gpu=unavailable_gpu_measurement(),
+                    backend="local",
+                )
             try:
                 (audio_bytes, duration_s), gpu = GpuMeter().run(lambda: self._request(text))
             except TTSAdapterError:
@@ -231,17 +336,13 @@ class PersistentNathanTTSAdapter:
             except Exception as exc:
                 self._close_process()
                 raise TTSAdapterError("Nathan TTS daemon request failed") from exc
-        if not audio_bytes or duration_s <= 0:
-            raise TTSAdapterError("Nathan TTS returned empty audio")
         # Validate the in-memory WAV header and duration without persisting it.
-        try:
-            with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
-                frames = wav_file.getnframes()
-                rate = wav_file.getframerate()
-                if frames <= 0 or rate <= 0:
-                    raise TTSAdapterError("Nathan TTS returned an empty WAV")
-        except (OSError, wave.Error):
-            raise TTSAdapterError("Nathan TTS returned malformed WAV") from None
+        self._validate_wav(audio_bytes, duration_s)
+        with self._lock:
+            self._audio_cache[text] = (audio_bytes, round(duration_s, 3))
+            self._audio_cache.move_to_end(text)
+            while len(self._audio_cache) > self._audio_cache_limit:
+                self._audio_cache.popitem(last=False)
         return TTSResult(
             audio_bytes=audio_bytes,
             duration_s=round(duration_s, 3),

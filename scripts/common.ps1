@@ -36,3 +36,74 @@ function Initialize-FamilyAiEnvironment {
     $env:PYTHONHOME = ''
     return @{ Python = $python; EnvFile = $envPath }
 }
+
+function Start-FamilyAiInferenceTunnel {
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot)
+
+    $sshCommand = Get-Command ssh -ErrorAction SilentlyContinue
+    if (-not $sshCommand) {
+        Write-Warning 'OpenSSH was not found; optional remote avatar/TTS will use fallback mode.'
+        return $null
+    }
+    $hostAlias = if ($env:AI_STATION_SSH_HOST) { $env:AI_STATION_SSH_HOST } else { 'ai' }
+    $runtimeDir = Join-Path $ProjectRoot 'runtime'
+    $null = New-Item -ItemType Directory -Force -Path $runtimeDir
+    $started = @()
+    $routes = @(@{ Name = 'avatar'; Port = 8791 })
+    if ($env:TTS_MODE -eq 'remote_preferred') {
+        $routes += @{ Name = 'tts'; Port = 8792 }
+    }
+    foreach ($route in $routes) {
+        $port = [int]$route.Port
+        $listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+            Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') } |
+            Select-Object -First 1
+        if ($listener) {
+            $owner = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+            if (-not $owner -or $owner.ProcessName -ne 'ssh') {
+                Write-Warning "Loopback port $port is occupied by another program; $($route.Name) will use fallback mode."
+            } else {
+                Write-Host "Reusing the private $($route.Name) tunnel on loopback port $port."
+            }
+            continue
+        }
+
+        $stdoutPath = Join-Path $runtimeDir ("{0}-tunnel.stdout.log" -f $route.Name)
+        $stderrPath = Join-Path $runtimeDir ("{0}-tunnel.stderr.log" -f $route.Name)
+        $arguments = @(
+            '-N', '-T',
+            '-o', 'BatchMode=yes',
+            '-o', 'ConnectTimeout=8',
+            '-o', 'ExitOnForwardFailure=yes',
+            '-o', 'ServerAliveInterval=20',
+            '-o', 'ServerAliveCountMax=3',
+            '-o', 'ControlMaster=no',
+            '-L', ("127.0.0.1:{0}:127.0.0.1:{0}" -f $port),
+            $hostAlias
+        )
+        $process = Start-Process -FilePath $sshCommand.Source -ArgumentList $arguments `
+            -WorkingDirectory $ProjectRoot -WindowStyle Hidden `
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+        Start-Sleep -Milliseconds 900
+        if ($process.HasExited) {
+            Write-Warning "Private $($route.Name) tunnel did not start; fallback mode remains available. See $stderrPath"
+            continue
+        }
+        $started += $process
+        Write-Host "Private AI Station $($route.Name) tunnel is ready on loopback port $port."
+    }
+    return $started
+}
+
+function Stop-FamilyAiInferenceTunnel {
+    param([System.Diagnostics.Process[]]$Process)
+
+    foreach ($tunnelProcess in @($Process)) {
+        if (-not $tunnelProcess -or $tunnelProcess.HasExited) { continue }
+        try {
+            Stop-Process -Id $tunnelProcess.Id -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "Could not stop inference tunnel PID $($tunnelProcess.Id): $($_.Exception.Message)"
+        }
+    }
+}

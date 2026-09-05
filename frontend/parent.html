@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>家长成长空间 · Family AI Teacher</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/parent.css?v=20260906-room" />
+  </head>
+  <body>
+    <a class="skip-link" href="#today">跳到今日成长</a>
+    <main class="parent-shell">
+      <div class="parent-masthead">
+        <a href="/" class="family-wordmark"
+          >⌂ &nbsp; 爸爸老师 <span>FAMILY AI TEACHER</span></a
+        ><span id="dashboardDate">家庭成长记录</span>
+      </div>
+      <header class="parent-header">
+        <div>
+          <p class="eyebrow">留住好奇，看见成长</p>
+          <h1>每一小步，都值得记住。</h1>
+          <p id="welcomeText" class="subtitle">
+            看见今天的小进步，也把爸爸的话带回家。
+          </p>
+        </div>
+        <div class="header-actions">
+          <a class="quiet-button" href="/">去陪孩子聊聊 ↗</a>
+          <a
+            class="primary-button"
+            href="/api/parent/export"
+            download="family-ai-teacher-export.json"
+            >导出家庭数据</a
+          >
+        </div>
+      </header>
+
+      <nav class="parent-nav" aria-label="成长空间导航">
+        <a href="#today">今天</a><a href="#learning">学习进度</a
+        ><a href="#memories">家庭记忆</a><a href="#familySettings">家庭设置</a>
+      </nav>
+      <p id="dashboardStatus" class="dashboard-status" role="status">
+        正在整理家庭的成长记录…
+      </p>
+      <section class="overview-grid" aria-label="今日概览">
+        <article class="metric-card coral">
+          <span>今天的交流</span>
+          <strong id="todayTurns">…</strong>
+          <small>轮真实互动</small>
+        </article>
+        <article class="metric-card blue">
+          <span>正在探索的能力</span>
+          <strong id="activeSkills">…</strong>
+          <small>项探索或练习</small>
+        </article>
+        <article class="metric-card green">
+          <span>值得留住的记忆</span>
+          <strong id="durableCount">…</strong>
+          <small>条由家庭长期保留</small>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="main-column">
+          <article class="panel today-panel" id="today">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">TODAY</p>
+                <h2>今天发生了什么</h2>
+              </div>
+              <span id="todayTopics" class="soft-pill">等待第一次互动</span>
+            </div>
+            <p id="todaySummary" class="today-summary">
+              一段小对话，也可能是一颗好奇心的种子。
+            </p>
+            <div id="todayTimeline" class="timeline empty-state">
+              今天还没有新的学习记录。
+            </div>
+          </article>
+
+          <article class="panel journal-panel">
+            <p class="eyebrow">慢慢长大的证据</p>
+            <h2>成长周记</h2>
+            <div id="journalContent" class="journal-content empty-state">
+              还在收集本周的小进步。
+            </div>
+            <button
+              id="journalEarlier"
+              class="quiet-button journal-earlier"
+              type="button"
+              hidden
+            >
+              查看更早的周记
+            </button>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">按自己的节奏</p>
+                <h2 id="learning">学习进度</h2>
+              </div>
+              <span class="soft-pill">可由爸爸修正</span>
+            </div>
+            <p class="panel-note">
+              接触过一个话题，不代表已经掌握。每项能力的学习状态由你确认。
+            </p>
+            <div id="skillGroups" class="skill-groups"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">有些小事，值得记很久</p>
+                <h2 id="memories">家庭记忆</h2>
+              </div>
+              <span id="memoryCounts" class="soft-pill">候选 0 · 长期 0</span>
+            </div>
+            <p class="panel-note">
+              普通聊天留在历史里；只有有长期价值的内容才进入候选，最终由爸爸保留或删除。
+            </p>
+            <form id="memoryForm" class="inline-form">
+              <input
+                aria-label="添加长期记忆"
+                id="memoryInput"
+                maxlength="240"
+                placeholder="手动添加一条值得长期记住的事"
+                required
+              />
+              <button class="primary-button" type="submit">加入长期记忆</button>
+            </form>
+            <p id="memorySaveStatus" class="save-status" role="status"></p>
+            <div class="memory-tools">
+              <label
+                ><span class="sr-only">搜索全部家庭记忆</span
+                ><input
+                  id="memorySearch"
+                  type="search"
+                  placeholder="搜索全部记忆…" /></label
+              ><label
+                ><span class="sr-only">记忆类型</span
+                ><select id="memoryFilter">
+                  <option value="">全部记忆</option>
+                  <option value="candidate">待你确认</option>
+                  <option value="durable">长期保留</option>
+                </select></label
+              >
+            </div>
+            <p id="memoryResultCount" class="list-caption" role="status"></p>
+            <div id="memoryList" class="memory-list"></div>
+            <div class="list-pagination">
+              <button id="memoryPrevious" class="quiet-button" type="button">
+                上一页</button
+              ><span id="memoryPage" aria-live="polite"></span
+              ><button id="memoryNext" class="quiet-button" type="button">
+                下一页
+              </button>
+            </div>
+          </article>
+          <details class="panel settings-panel" id="familySettings">
+            <summary class="panel-heading">
+              <div>
+                <div>
+                  <p class="eyebrow">按孩子自己的节奏</p>
+                  <h2>家庭设置</h2>
+                </div>
+                <span id="brainSummary" class="soft-pill">爸爸来决定</span>
+              </div>
+            </summary>
+            <p class="panel-note">
+              称呼、兴趣与教学方式都由你决定。保存后，爸爸老师会在下一轮自然使用。
+            </p>
+            <form id="profileForm" class="profile-form">
+              <div class="field-grid compact-fields">
+                <label class="nickname-field">
+                  <span class="field-title"
+                    ><span>平时怎么叫宝贝</span><small>随时可改</small></span
+                  >
+                  <input
+                    id="profileName"
+                    maxlength="16"
+                    placeholder="例如：小宝"
+                    autocomplete="off"
+                  />
+                  <small class="field-hint"
+                    >可填“小宝”或“小宝宝贝”。保存后，孩子端会自动更新，下一轮对话立即使用。</small
+                  >
+                </label>
+                <label>
+                  <span>年龄</span>
+                  <input
+                    id="profileAge"
+                    type="number"
+                    min="2"
+                    max="17"
+                    inputmode="numeric"
+                  />
+                </label>
+                <label>
+                  <span>爸爸老师的语气</span>
+                  <select id="teacherStyle">
+                    <option value="warm_guided">温暖引导</option>
+                    <option value="playful">活泼游戏</option>
+                    <option value="calm">安静陪伴</option>
+                  </select>
+                </label>
+                <label>
+                  <span>陪伴内容</span>
+                  <select id="brainMode">
+                    <option value="ai_station">自由问答 + 短活动</option>
+                    <option value="local_lessons_only">
+                      仅短活动（无需家庭大脑）
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>最近兴趣</span>
+                  <textarea
+                    id="profileInterests"
+                    rows="2"
+                    placeholder="恐龙、太空、积木"
+                  ></textarea>
+                </label>
+                <label>
+                  <span>当前学习目标</span>
+                  <textarea
+                    id="learningGoals"
+                    rows="2"
+                    placeholder="学会数到20、表达今天的心情"
+                  ></textarea>
+                </label>
+                <label>
+                  <span>容易接受的教法</span>
+                  <textarea
+                    id="teachingPreferences"
+                    rows="2"
+                    placeholder="短问答、游戏、实物观察"
+                  ></textarea>
+                </label>
+                <label>
+                  <span>内容边界</span>
+                  <textarea
+                    id="contentBoundaries"
+                    rows="2"
+                    placeholder="例如：不要讲吓人的故事"
+                  ></textarea>
+                </label>
+              </div>
+              <fieldset class="activity-settings">
+                <legend>孩子端可以使用的活动</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    name="enabledActivity"
+                    value="drawing"
+                  />画画</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    name="enabledActivity"
+                    value="story"
+                  />故事</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    name="enabledActivity"
+                    value="game"
+                  />小游戏</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    name="enabledActivity"
+                    value="music"
+                  />唱歌</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    name="enabledActivity"
+                    value="vision_photo"
+                  />拍照观察</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    name="enabledActivity"
+                    value="vision_video"
+                  />短视频观察</label
+                >
+              </fieldset>
+              <div class="form-actions">
+                <span
+                  id="profileSaveStatus"
+                  class="save-status"
+                  role="status"
+                ></span>
+                <button class="primary-button" type="submit">
+                  保存家庭设置
+                </button>
+              </div>
+            </form>
+          </details>
+        </div>
+
+        <aside class="side-column">
+          <article class="panel message-panel">
+            <div class="panel-heading compact">
+              <div>
+                <p class="eyebrow">把爸爸的话，带回家</p>
+                <h2>爸爸留言</h2>
+              </div>
+            </div>
+            <form id="messageForm" class="stack-form">
+              <label class="sr-only" for="messageInput"
+                >想让爸爸老师转达的话</label
+              ><textarea
+                id="messageInput"
+                maxlength="120"
+                rows="3"
+                placeholder="例如：今天告诉小宝，爸爸很想他。"
+                required
+              ></textarea>
+              <button class="primary-button" type="submit">交给爸爸老师</button>
+            </form>
+            <p id="messageSaveStatus" class="save-status" role="status"></p>
+            <p class="panel-note message-note">
+              会在合适的对话中传达，孩子回应后会显示在这里。
+            </p>
+            <div id="messageList" class="message-list"></div>
+            <button
+              id="messagesEarlier"
+              class="quiet-button"
+              type="button"
+              hidden
+            >
+              查看更早的留言
+            </button>
+          </article>
+
+          <article class="panel next-panel">
+            <p class="eyebrow">让好奇心带路</p>
+            <h2>下一步建议</h2>
+            <strong id="nextTitle">正在准备</strong>
+            <p id="nextSuggestion">根据兴趣与学习阶段，生成一项短活动。</p>
+          </article>
+
+          <details class="panel data-panel">
+            <summary>
+              <p class="eyebrow">家庭拥有，也由家庭掌握</p>
+              <h2>家庭数据管理</h2>
+            </summary>
+            <p class="panel-note">
+              建议先导出备份。清除操作只处理结构化文字资料，不会碰声音模型、头像或应用配置。
+            </p>
+            <div class="data-actions">
+              <a
+                class="quiet-button"
+                href="/api/parent/export"
+                download="family-ai-teacher-export.json"
+                >先导出备份</a
+              >
+              <button
+                id="clearSessionData"
+                class="danger-outline-button"
+                type="button"
+              >
+                清除聊天与当前活动
+              </button>
+              <button
+                id="resetFamilyData"
+                class="danger-outline-button"
+                type="button"
+              >
+                重置全部家庭数据
+              </button>
+            </div>
+            <p id="dataActionStatus" class="save-status" role="status"></p>
+          </details>
+        </aside>
+      </section>
+
+      <p class="privacy-footer">
+        结构化成长信息保存在家庭电脑；导出中不包含原始录音、照片或视频。
+      </p>
+    </main>
+    <script src="/parent.js?v=20260906-room" defer></script>
+  </body>
+</html>

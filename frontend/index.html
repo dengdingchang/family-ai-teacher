@@ -3,114 +3,346 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
     <title>爸爸老师 · 家庭 AI 教室</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=20260903-4" />
+    <link rel="stylesheet" href="/styles.css?v=20260906-room-idle1" />
   </head>
   <body>
+    <a class="skip-link" href="#recordButton">开始交流</a>
     <main class="shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">FAMILY AI TEACHER · PHASE 2</p>
-          <h1>爸爸老师</h1>
-          <p class="subtitle">Nathan 设计的 AI 爸爸老师，陪你一起发现小问题。</p>
+        <div class="brand">
+          <svg
+            class="brand-mark"
+            viewBox="0 0 48 48"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M8 24 24 10l16 14v16H8V24Z"
+              stroke="currentColor"
+              stroke-width="3"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M18 29c0 7 12 7 12 0"
+              stroke="currentColor"
+              stroke-width="3"
+              stroke-linecap="round"
+            />
+            <path
+              d="M18 22h.1M30 22h.1"
+              stroke="currentColor"
+              stroke-width="4"
+              stroke-linecap="round"
+            />
+          </svg>
+          <div>
+            <h1>
+              爸爸老师<span class="brand-byline">Nathan 的 AI 陪伴老师</span>
+            </h1>
+            <p id="childWelcome" class="subtitle">一起说、一起看、一起学。</p>
+          </div>
         </div>
-        <span id="serviceBadge" class="badge">准备中</span>
+        <div class="topbar-actions">
+          <span id="serviceBadge" class="badge" role="status">正在准备</span
+          ><a class="parent-link" href="/parent" aria-label="打开家长成长空间"
+            >家长空间 <span aria-hidden="true">↗</span></a
+          >
+        </div>
       </header>
-
-      <section class="card avatar-card" aria-label="爸爸老师和孩子画面">
-        <div class="visual-heading">
-          <span class="eyebrow">DAD &amp; ME</span>
-          <button class="help-tip" type="button" aria-label="画面帮助" title="爸爸在大画面里；摄像头打开后，孩子画面会出现在右上角。">?</button>
+      <section class="stage-card" aria-label="爸爸老师和孩子画面">
+        <div class="stage-heading">
+          <h2>今天，一起发现点什么？</h2>
+          <span id="captureState" class="step-chip">画面按需发送</span>
         </div>
-        <div class="avatar-stage" id="avatarStage">
-          <div class="halo"></div>
-          <img id="avatarImage" src="/api/avatar" alt="爸爸老师头像" />
-          <div id="mouth" class="mouth mouth-closed" aria-hidden="true">
-            <img class="mouth-reveal" src="/api/avatar" alt="" />
-            <img class="mouth-skin" src="/api/avatar" alt="" />
-            <span class="mouth-line"></span>
+        <div class="video-pair" id="avatarStage" data-state="idle">
+          <article class="video-tile dad-video">
+            <div class="video-frame">
+              <img
+                id="avatarImage"
+                src="/api/avatar?v=neutral-20260904"
+                alt="Nathan 创建的 AI 爸爸老师"
+              />
+              <video id="avatarIdle" muted playsinline loop preload="auto" aria-label="正在陪伴的 AI 爸爸老师" hidden></video>
+              <canvas
+                id="avatarCanvas"
+                width="512"
+                height="512"
+                aria-label="会随声音自然说话的 AI 爸爸老师"
+                hidden
+              ></canvas
+              ><span class="frame-label">爸爸老师</span>
+              <div class="voice-bars" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </div>
+            <div class="video-meta">
+              <strong>我陪你慢慢来</strong
+              ><span id="avatarStateText">爸爸老师正在准备</span>
+            </div>
+          </article>
+          <article class="video-tile child-video" aria-label="孩子自己的画面">
+            <div class="video-frame">
+              <div class="video-placeholder">
+                <svg
+                  class="child-portrait"
+                  viewBox="0 0 160 160"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="80"
+                    cy="80"
+                    r="70"
+                    fill="currentColor"
+                    opacity=".07"
+                  />
+                  <path
+                    d="M36 132c3-30 20-44 44-44s41 14 44 44"
+                    fill="currentColor"
+                    opacity=".13"
+                  />
+                  <circle
+                    cx="80"
+                    cy="62"
+                    r="32"
+                    fill="currentColor"
+                    opacity=".18"
+                  />
+                  <path
+                    d="M67 66h.1M93 66h.1"
+                    stroke="currentColor"
+                    stroke-width="5"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M71 77c5 5 13 5 18 0"
+                    stroke="currentColor"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="m126 22 3 9 9 3-9 3-3 9-3-9-9-3 9-3 3-9Z"
+                    fill="currentColor"
+                    opacity=".45"
+                  /></svg
+                ><strong>这里是你的位置</strong
+                ><span>只用声音，也能一起玩</span>
+              </div>
+              <video id="cameraVideo" autoplay playsinline muted></video
+              ><canvas id="captureCanvas" hidden></canvas
+              ><img
+                id="capturedFrame"
+                alt="最近一次手动截取的画面"
+                hidden
+              /><span class="frame-label child-label">我</span>
+            </div>
+            <div class="video-meta child-video-meta">
+              <div>
+                <strong>小小探索家</strong
+                ><span id="cameraStatus" role="status">摄像头还没打开</span>
+              </div>
+              <div
+                id="cameraToolbar"
+                class="camera-toolbar"
+                aria-label="画面工具"
+              >
+                <button
+                  id="cameraButton"
+                  class="camera-tool"
+                  type="button"
+                  aria-label="打开摄像头"
+                  title="打开摄像头"
+                >
+                  ◉</button
+                ><button
+                  id="captureButton"
+                  class="camera-tool"
+                  type="button"
+                  data-activity="vision_photo"
+                  aria-label="拍一张给爸爸看"
+                  title="拍一张给爸爸看"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M3 7h4l2-3h6l2 3h4v13H3V7Z"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linejoin="round"
+                    />
+                    <circle
+                      cx="12"
+                      cy="13"
+                      r="4"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    />
+                  </svg></button
+                ><button
+                  id="recordVideoButton"
+                  class="camera-tool"
+                  type="button"
+                  data-activity="vision_video"
+                  disabled
+                  aria-label="录一小段给爸爸看"
+                  title="录一小段给爸爸看"
+                >
+                  ▷
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div class="stage-footer">
+          <div class="avatar-caption" role="status">
+            <span class="dot" aria-hidden="true"></span
+            ><span id="statusText">正在连接爸爸老师…</span>
           </div>
-          <div class="speech-glow" aria-hidden="true"></div>
-          <div class="child-preview" aria-label="孩子自己的画面">
-            <video id="cameraVideo" autoplay playsinline muted></video>
-            <span>我</span>
-          </div>
+          <span class="privacy-inline">画面由你决定，录音和视频不保存</span>
         </div>
-        <div class="avatar-caption">
-          <span class="dot"></span>
-          <span id="statusText">正在连接本地服务…</span>
-        </div>
-        <p id="recordHint" class="sr-only" aria-live="polite"></p>
+        <div
+          id="visionResult"
+          class="vision-result"
+          aria-live="polite"
+          hidden
+        ></div>
       </section>
-
-      <section class="card interaction-card" aria-label="儿童交互">
+      <section class="conversation-controls" aria-label="和爸爸老师交流">
+        <div class="voice-control">
+          <button
+            id="recordButton"
+            class="record-button"
+            type="button"
+            aria-pressed="false"
+            aria-describedby="recordHint"
+          >
+            <span class="record-icon" aria-hidden="true"></span
+            ><span id="recordLabel">和爸爸老师说话</span>
+          </button>
+          <p id="recordHint" class="record-hint" aria-live="polite">
+            点一下，说说你今天想做什么
+          </p>
+        </div>
+        <div class="activity-row" aria-label="快速开始一个活动">
+          <span>或者，一起玩</span>
+          <button
+            class="activity-chip"
+            type="button"
+            data-activity="drawing"
+            data-prompt="爸爸老师，带我一起画画吧。"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="m5 15 11-11 4 4L9 19l-5 1 1-5Z"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linejoin="round"
+              />
+              <path
+                d="m13 7 4 4M5 15l4 4"
+                stroke="currentColor"
+                stroke-width="1.8"
+              /></svg
+            ><span>画画</span>
+          </button>
+          <button
+            class="activity-chip"
+            type="button"
+            data-activity="story"
+            data-prompt="爸爸老师，讲一个让我也能接着说的故事吧。"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M12 6C9 3 5 4 3 5v15c3-2 6-2 9 0 3-2 6-2 9 0V5c-2-1-6-2-9 1Zm0 0v14"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linejoin="round"
+              /></svg
+            ><span>故事</span>
+          </button>
+          <button
+            class="activity-chip"
+            type="button"
+            data-activity="game"
+            data-prompt="爸爸老师，和我玩一个简单的小游戏吧。"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linejoin="round"
+              /></svg
+            ><span>小游戏</span>
+          </button>
+        </div>
+      </section>
+      <section class="interaction-card" aria-label="完整对话记录">
         <div class="card-heading">
-          <div class="title-with-help">
-            <div>
-              <p class="eyebrow">TALK</p>
-              <h2>和爸爸老师说话</h2>
-            </div>
-            <button class="help-tip" type="button" aria-label="交流帮助" title="点一次开始持续交流；孩子说完停一下，爸爸老师会自动回答。再点一次结束。">?</button>
+          <div>
+            <p class="eyebrow">我们的对话</p>
+            <h2 id="conversationTitle">一起学，一起聊</h2>
           </div>
-          <span class="step-chip">持续交流</span>
+          <span class="history-caption">往上滑，看看之前聊了什么</span>
         </div>
-        <div class="chat-stream" aria-live="polite">
-          <div class="chat-message child-message">
-            <span class="chat-speaker">我</span>
-            <p id="userTextBox">还没有说话</p>
+        <div class="chat-shell">
+          <div
+            id="chatHistory"
+            class="chat-history"
+            tabindex="0"
+            role="log"
+            aria-live="polite"
+            aria-label="完整聊天记录"
+          >
+            <p id="chatEmpty" class="chat-empty">
+              还没有对话，先和爸爸老师说一句吧。
+            </p>
           </div>
-          <div class="chat-message dad-message">
-            <span class="chat-speaker">爸爸老师</span>
-            <div id="answerBox" class="answer-box">
-              <span class="answer-label">爸爸老师会在这里回答</span>
+          <div
+            id="liveTurn"
+            class="chat-stream live-turn"
+            aria-live="polite"
+            hidden
+          >
+            <div class="chat-message child-message">
+              <span class="chat-speaker">我</span>
+              <p id="userTextBox">正在听你说…</p>
+            </div>
+            <div class="chat-message dad-message">
+              <span class="chat-speaker">爸爸老师</span>
+              <div id="answerBox" class="answer-box">
+                <span class="answer-label">正在想一个好玩的教法…</span>
+              </div>
             </div>
           </div>
         </div>
-        <form id="textForm" class="text-form">
-          <input id="textInput" type="text" maxlength="500" placeholder="给大孩子的文字入口" autocomplete="off" aria-label="文字输入" />
-          <button type="submit">发送</button>
-        </form>
-        <button id="recordButton" class="record-button" type="button" aria-pressed="false">
-          <span class="record-icon" aria-hidden="true"></span>
-          <span id="recordLabel">点一下开始交流</span>
-        </button>
+        <details class="grownup-help">
+          <summary>大人帮忙打字</summary>
+          <form id="textForm" class="text-form">
+            <input
+              id="textInput"
+              type="text"
+              maxlength="500"
+              placeholder="把想说的话写在这里"
+              autocomplete="off"
+              aria-label="文字输入"
+            /><button type="submit">发送</button>
+          </form>
+        </details>
       </section>
-
-      <section class="card camera-card" aria-label="摄像头">
-        <div class="card-heading compact">
-          <div class="title-with-help">
-            <div>
-              <p class="eyebrow">CAMERA · CHILD VIEW</p>
-              <h2>看一看</h2>
-            </div>
-            <button class="help-tip" type="button" aria-label="摄像头帮助" title="交流中每15秒只准备一帧；拍照和短视频只有在你点击后才会发送给 AI Station。">?</button>
-          </div>
-          <span id="captureState" class="step-chip">按需查看</span>
-        </div>
-        <div class="camera-layout">
-          <div class="camera-preview-wrap capture-preview">
-            <canvas id="captureCanvas" hidden></canvas>
-            <img id="capturedFrame" alt="最近一次手动截取的画面" hidden />
-            <span class="capture-placeholder">📷</span>
-          </div>
-          <div class="camera-actions">
-            <div class="button-row">
-              <button id="captureButton" class="secondary-button icon-button" type="button" aria-label="拍一张给爸爸看" title="拍一张给爸爸看">📸</button>
-              <button id="cameraButton" class="secondary-button icon-button" type="button" aria-label="打开摄像头" title="打开摄像头">📹</button>
-              <button id="recordVideoButton" class="secondary-button icon-button" type="button" disabled aria-label="录一小段给爸爸看" title="录一小段给爸爸看">🎥</button>
-            </div>
-            <span id="cameraStatus" class="small-note">摄像头尚未打开</span>
-            <div id="visionResult" class="vision-result" aria-live="polite" hidden></div>
-          </div>
-        </div>
-      </section>
-
       <footer class="privacy-note">
-        <span aria-hidden="true">🔒</span>
-        <button class="help-tip" type="button" aria-label="隐私说明" title="本机不保存原始录音或视频；自动画面只在下一轮对话临时发送，随后丢弃。">?</button>
+        <span>由 Nathan 创建的 AI 老师，陪伴从这里延伸到生活里。</span>
+        <details class="privacy-details">
+          <summary>画面与隐私</summary>
+          <p>
+            本机预览不会上传。只有点击拍照、录一小段，或明确说“爸爸你看我的画”时，才会按这一次请求把画面临时发送给家庭
+            AI 服务分析。普通聊天不会拍照，原始录音、照片和视频不会保存。
+          </p>
+        </details>
       </footer>
     </main>
-    <script type="module" src="/app.js?v=20260903-4"></script>
+    <script type="module" src="/app.js?v=20260906-voice-look-idle1"></script>
   </body>
 </html>

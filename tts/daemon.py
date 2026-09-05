@@ -21,6 +21,16 @@ def _emit(payload: dict[str, object]) -> None:
     sys.stdout.flush()
 
 
+def _wav_payload(waveform, sample_rate: int, sf) -> dict[str, object]:
+    output = io.BytesIO()
+    sf.write(output, waveform, int(sample_rate), format="WAV")
+    return {
+        "audio_base64": base64.b64encode(output.getvalue()).decode("ascii"),
+        "sample_rate": int(sample_rate),
+        "duration_s": round(len(waveform) / int(sample_rate), 3),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Family AI Teacher Nathan TTS daemon")
     parser.add_argument("--model", required=True)
@@ -28,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ref-text", required=True)
     parser.add_argument("--language", default="Chinese")
     parser.add_argument("--dtype", choices=("float16", "bfloat16"), default="float16")
+    parser.add_argument(
+        "--prompt-mode",
+        choices=("speaker_vector", "icl"),
+        default="speaker_vector",
+        help="Use the fast speaker embedding or the longer reference-code context.",
+    )
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()
 
@@ -61,7 +77,23 @@ def main() -> int:
             attn_implementation="sdpa",
         )
 
-    _emit({"event": "ready", "device": device_map, "dtype": str(dtype)})
+        # Build the audited Nathan voice prompt once. Re-reading and encoding
+        # the 37-second reference on every turn defeats the persistent worker.
+        speaker_vector_mode = args.prompt_mode == "speaker_vector"
+        voice_clone_prompt = model.create_voice_clone_prompt(
+            ref_audio=str(ref_audio),
+            ref_text=None if speaker_vector_mode else args.ref_text,
+            x_vector_only_mode=speaker_vector_mode,
+        )
+
+    _emit(
+        {
+            "event": "ready",
+            "device": device_map,
+            "dtype": str(dtype),
+            "prompt_mode": args.prompt_mode,
+        }
+    )
     for raw_line in sys.stdin:
         line = raw_line.strip()
         if not line:
@@ -73,6 +105,31 @@ def main() -> int:
             if request.get("command") == "shutdown":
                 _emit({"event": "shutdown", "id": request_id})
                 return 0
+            batch_value = request.get("texts")
+            if batch_value is not None:
+                if not isinstance(batch_value, list) or not 1 <= len(batch_value) <= 2:
+                    raise ValueError("TTS batch must contain one or two texts")
+                texts = [" ".join(str(item).strip().split()) for item in batch_value]
+                if any(not text or len(text) > 200 for text in texts):
+                    raise ValueError("TTS batch contains invalid text")
+                with contextlib.redirect_stdout(sys.stderr):
+                    with torch.inference_mode():
+                        wavs, sample_rate = model.generate_voice_clone(
+                            text=texts,
+                            language=[args.language] * len(texts),
+                            voice_clone_prompt=voice_clone_prompt,
+                            non_streaming_mode=True,
+                        )
+                if len(wavs) != len(texts):
+                    raise RuntimeError("TTS batch output count did not match input")
+                _emit(
+                    {
+                        "event": "audio_batch",
+                        "id": request_id,
+                        "items": [_wav_payload(wav, int(sample_rate), sf) for wav in wavs],
+                    }
+                )
+                continue
             text = " ".join(str(request.get("text", "")).strip().split())
             if not text:
                 raise ValueError("TTS text is empty")
@@ -81,21 +138,18 @@ def main() -> int:
                     wavs, sample_rate = model.generate_voice_clone(
                         text=text,
                         language=args.language,
-                        ref_audio=str(ref_audio),
-                        ref_text=args.ref_text,
-                        x_vector_only_mode=False,
+                        voice_clone_prompt=voice_clone_prompt,
+                        # The worker receives a complete short sentence. The
+                        # runtime documents this mode as avoiding its
+                        # simulated incremental text path.
+                        non_streaming_mode=True,
                     )
-                output = io.BytesIO()
-                sf.write(output, wavs[0], int(sample_rate), format="WAV")
-            audio_bytes = output.getvalue()
-            duration_s = round(len(wavs[0]) / int(sample_rate), 3)
+            audio = _wav_payload(wavs[0], int(sample_rate), sf)
             _emit(
                 {
                     "event": "audio",
                     "id": request_id,
-                    "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-                    "sample_rate": int(sample_rate),
-                    "duration_s": duration_s,
+                    **audio,
                 }
             )
         except Exception as exc:  # Keep the daemon alive for the next short request.
