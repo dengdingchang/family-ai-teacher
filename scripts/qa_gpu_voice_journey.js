@@ -101,7 +101,8 @@ async (page) => {
     // blank; cover preflight failures too. Never release the outer routes here.
     if (page.url() !== "about:blank") {
       await page.evaluate(async () => {
-        if (typeof stopContinuousConversation === "function") stopContinuousConversation();
+        const recordButton = document.querySelector("#recordButton");
+        if (recordButton?.getAttribute("aria-pressed") === "true") recordButton.click();
         globalThis.familyInteractionClock?.end();
         await window.__restoreSyntheticVoiceQa?.();
       }).catch(() => {});

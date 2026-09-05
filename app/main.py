@@ -826,7 +826,10 @@ def _activity_opening_reply(
         openings[activity] = f"I like {word.lower()}s，意思是我喜欢{meaning}。你来试着说这句话，好吗？"
     elif activity == "colors" and step == 3:
         openings[activity] = "想象一块红积木和一块蓝积木。它们的颜色一样，还是不一样？"
-    return _personalize_reply(openings.get(activity, ""), profile)
+    # A requested activity should begin with its instruction. Welcome and
+    # parent-message paths still use the child's name without making every
+    # activity wait for a separate vocative before its first teaching sentence.
+    return openings.get(activity, "")
 
 
 def _drawing_steps(topic: str) -> tuple[str, str]:
@@ -1483,13 +1486,13 @@ def _activity_turn_reply_unchecked(
                 skills = {item["id"]: item for item in memory.get_skill_graph()["skills"]}
                 if (skills.get("math.count_1_10", {}).get("status") == "mastered"
                         and skills.get("math.count_11_20", {}).get("status") != "mastered"):
-                    return (_personalize_reply("我们从十一接着数：十一、十二、十三。十三后面是几？", profile),
+                    return ("我们从十一接着数：十一、十二、十三。十三后面是几？",
                             _activity_transition("numbers", 4, topic=subject))
                 if (skills.get("math.count_1_10", {}).get("status") == "mastered"
                         and skills.get("math.count_11_20", {}).get("status") == "mastered"):
                     opening = ("我们做个加法复习" if skills.get("math.addition", {}).get("status") == "mastered"
                                else "我们试试加法小挑战")
-                    return (_personalize_reply(f"{opening}：三块积木再加两块，一共有几块？", profile),
+                    return (f"{opening}：三块积木再加两块，一共有几块？",
                             _activity_transition("numbers", 3, topic=subject))
             except (OSError, ValueError, KeyError, TypeError):
                 logger.warning("Skill assessment unavailable; using the basic number activity")

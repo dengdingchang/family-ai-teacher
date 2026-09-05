@@ -1,9 +1,16 @@
+param(
+    [ValidateRange(7,99)][int]$RunNumber = 7
+)
+
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$sessionName = 'family-gpu-voice-run7'
-$stem = Join-Path $projectRoot 'output/playwright/synthetic-voice-journey-7'
-foreach ($extension in @('.json','.log','.png')) {
-    if (Test-Path -LiteralPath ($stem + $extension)) { throw 'Run 7 already has artifacts; preserve this one-shot receipt.' }
+$sessionName = "family-gpu-voice-run$RunNumber"
+$stem = Join-Path $projectRoot "output/playwright/synthetic-voice-journey-$RunNumber"
+$beforePath = Join-Path $projectRoot "runtime/gpu-voice-journey-$RunNumber-before.json"
+$integrityPath = Join-Path $projectRoot "runtime/gpu-voice-journey-$RunNumber-integrity.json"
+$scriptPath = Join-Path $projectRoot "runtime/qa-synthetic-voice-journey-$RunNumber.js"
+foreach ($artifactPath in @(($stem + '.json'),($stem + '.log'),($stem + '.png'),$beforePath,$integrityPath,$scriptPath)) {
+    if (Test-Path -LiteralPath $artifactPath) { throw "Run $RunNumber already has artifacts; preserve this one-shot receipt." }
 }
 function Read-JourneyIntegrity {
     return [ordered]@{
@@ -16,12 +23,11 @@ function Read-JourneyIntegrity {
 $before = Read-JourneyIntegrity
 $healthBefore = Invoke-RestMethod 'http://127.0.0.1:8760/health'
 if ($healthBefore.stt_runtime.device -ne 'cuda' -or $healthBefore.tts_warmup -ne 'ready') { throw 'Expected ready CUDA STT and TTS before QA.' }
-$before | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $projectRoot 'runtime/gpu-voice-journey-7-before.json') -Encoding utf8
+$before | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $beforePath -Encoding utf8
 $probe = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'qa_synthetic_microphone.js') -Raw
-$probe = $probe.Replace('output/playwright/synthetic-voice-journey.png','output/playwright/synthetic-voice-journey-7.png')
+$probe = $probe.Replace('output/playwright/synthetic-voice-journey.png',"output/playwright/synthetic-voice-journey-$RunNumber.png")
 $wrapper = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'qa_gpu_voice_journey.js') -Raw
 $generated = $wrapper.Replace('/* SYNTHETIC_PROBE */ null',$probe)
-$scriptPath = Join-Path $projectRoot 'runtime/qa-synthetic-voice-journey-7.js'
 [IO.File]::WriteAllText($scriptPath,$generated,[Text.UTF8Encoding]::new($false))
 $result = $null
 $opened = $false
@@ -40,7 +46,7 @@ try {
     $after = Read-JourneyIntegrity
     $integrityPass = ($before.files | ConvertTo-Json -Compress) -ceq ($after.files | ConvertTo-Json -Compress)
     $integrity = [ordered]@{ before=$before; after=$after; pass=$integrityPass; healthBefore=$healthBefore; healthAfter=(Invoke-RestMethod 'http://127.0.0.1:8760/health') }
-    $integrity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $projectRoot 'runtime/gpu-voice-journey-7-integrity.json') -Encoding utf8
+    $integrity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $integrityPath -Encoding utf8
     if ($null -ne $result) {
         $result | Add-Member -NotePropertyName familyFileIntegrity -NotePropertyValue $integrity
         $gpuRuntimePass = $integrity.healthAfter.stt_runtime.device -eq 'cuda' -and $integrity.healthAfter.stt_runtime.status -eq 'ready' -and -not $integrity.healthAfter.stt_runtime.fallback_reason

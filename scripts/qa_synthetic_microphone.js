@@ -486,6 +486,10 @@ async (page) => {
                   sequence: event.sequence,
                   semantic: event.semantic,
                   audioStream: event.audio_stream,
+                  ttsStartedS: Number.isFinite(event.tts_started_s) ? event.tts_started_s : undefined,
+                  ttsCallS: Number.isFinite(event.tts_call_s) ? event.tts_call_s : undefined,
+                  deltaChars: event.event === "assistant_delta" && typeof event.text === "string"
+                    ? event.text.length : undefined,
                   avatar: Boolean(
                     event.avatar_cued ||
                     event.avatar_pending ||

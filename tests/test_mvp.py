@@ -189,7 +189,7 @@ class MvpUnitTests(unittest.TestCase):
             "enabled_activities": ["drawing", "story"],
         }
         reply = _explicit_lesson_reply("爸爸老师，带我一起画画吧。", profile)
-        self.assertTrue(reply.startswith("小宝，"))
+        self.assertTrue(reply.startswith("先画一个大圆形。"))
         self.assertIn("大圆形", reply)
         prompt = _system_prompt(profile, [], [], {"skills": []}, {}, None)
         self.assertIn("孩子常用昵称：小宝", prompt)
@@ -262,7 +262,7 @@ class MvpUnitTests(unittest.TestCase):
             with patch.object(main_module, "memory", store):
                 profile = store.get_child_profile()
                 reply, transition = _activity_turn_reply("我想学英语", profile)
-                self.assertIn("小宝", reply)
+                self.assertTrue(reply.startswith("Apple 是苹果。"))
                 self.assertEqual(store.get_activity_state()["status"], "idle")
                 main_module._record_turn("我想学英语", reply, activity_transition=transition)
                 self.assertEqual(store.get_activity_state()["activity"], "english")
@@ -365,7 +365,7 @@ class MvpUnitTests(unittest.TestCase):
         self.assertEqual(_spoken_chunks(reply, "测试宝"), [
             "月亮离我们很远。", "走动时它看起来像在跟着你，要去窗边看看吗？",
         ])
-        self.assertTrue(_explicit_lesson_reply("带我一起画画吧", profile).startswith("测试宝，"))
+        self.assertTrue(_explicit_lesson_reply("带我一起画画吧", profile).startswith("先画一个大圆形。"))
         self.assertTrue(_parent_message_reply({"text": "告诉宝宝爸爸想他。"}, profile).startswith("测试宝，"))
         with patch.object(main_module, "memory", SimpleNamespace(get_continuity_cue=lambda: {"kind": "none"})):
             self.assertTrue(main_module._welcome_back_reply(profile).startswith("测试宝，"))
@@ -488,6 +488,58 @@ class MvpUnitTests(unittest.TestCase):
         self.assertEqual(FailingPrimary.calls, 1)
         self.assertEqual(WorkingFallback.calls, 1)
 
+    def test_activity_stream_starts_with_instruction_and_requires_playback_receipt(self) -> None:
+        class InstructionTts:
+            def __init__(self):
+                self.spoken = []
+
+            def synthesize_stream(self, text, **_kwargs):
+                self.spoken.append(text)
+                wav_bytes = io.BytesIO()
+                with wave.open(wav_bytes, "wb") as wav:
+                    wav.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+                    wav.writeframes(b"\0\0" * 1600)
+                yield TTSResult(audio_bytes=wav_bytes.getvalue(), duration_s=0.1,
+                                elapsed_s=0.01, gpu=unavailable_gpu_measurement(), backend="test")
+
+        async def collect(text, turn_id):
+            events = []
+            async for chunk in main_module._stream_conversation(text, turn_id=turn_id, audio_streaming=True):
+                events.extend(json.loads(line[6:]) for line in chunk.splitlines() if line.startswith("data: "))
+            return events
+
+        cases = (
+            ("我想画一只恐龙", "我们画恐龙，先画长长的椭圆身体。"),
+            ("我想听一个恐龙故事", "小恐龙在森林里发现了一串脚印。"),
+            ("我想学数字", "我们从十一接着数：十一、十二、十三。"),
+        )
+        for index, (request, first_instruction) in enumerate(cases):
+            with self.subTest(request=request), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                template = root / "profile.example.json"
+                template.write_text(json.dumps({"name": "测试宝", "age": 4}, ensure_ascii=False), encoding="utf-8")
+                store = MemoryStore(root / "data", root / "data/profile.json", root / "data/history.jsonl", root / "data/events.jsonl", template)
+                voice = InstructionTts()
+                skills = {"skills": [{"id": "math.count_1_10", "status": "mastered"}]}
+                turn_id = f"instruction-first-{index}"
+                with patch.object(main_module, "memory", store), patch.object(main_module, "tts", voice), patch.object(store, "get_skill_graph", return_value=skills):
+                    events = asyncio.run(collect(request, turn_id))
+                    try:
+                        audio = [item for item in events if item.get("event") == "audio"]
+                        done = next(item for item in events if item.get("event") == "done")
+                        self.assertTrue(done["ok"], events)
+                        self.assertEqual(voice.spoken[0], first_instruction)
+                        self.assertTrue(audio[0]["semantic"])
+                        self.assertTrue(all(item["semantic"] for item in audio))
+                        self.assertEqual("".join(voice.spoken), done["assistant_text"])
+                        self.assertTrue(done["assistant_text"].endswith("？"))
+                        self.assertTrue(done["ok"] and done["commit_required"])
+                        self.assertEqual(store.get_history(), [])
+                        self.assertEqual(store.get_activity_state()["status"], "idle")
+                    finally:
+                        asyncio.run(main_module.cancel_streaming_turn(turn_id))
+                    self.assertEqual(store.get_history(), [])
+
     def test_cached_nickname_prevents_redundant_acknowledgement(self) -> None:
         class AckFirstTts:
             spoken: list[str] = []
@@ -513,9 +565,9 @@ class MvpUnitTests(unittest.TestCase):
 
         async def collect() -> list[dict]:
             result = []
-            # Activity openings still use the cached nickname; routine science
-            # answers now start with their content instead.
-            async for chunk in main_module._stream_conversation("带我一起画画吧"):
+            # Welcomes retain the cached nickname, while requested activities
+            # start with their teaching content.
+            async for chunk in main_module._stream_conversation("我回来了"):
                 for line in chunk.splitlines():
                     if line.startswith("data: "):
                         result.append(json.loads(line[6:]))
