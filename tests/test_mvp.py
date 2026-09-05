@@ -338,7 +338,7 @@ class MvpUnitTests(unittest.TestCase):
         reply = _ensure_guided_reply("我想学英语", "看，这是苹果。你想吃吗？")
         self.assertIn("Hello", reply)
 
-    def test_preschool_knowledge_answers_are_fast_personal_and_guided(self) -> None:
+    def test_preschool_knowledge_answers_are_direct_and_guided(self) -> None:
         profile = {"name": "小宝"}
         examples = (
             ("为什么月亮一直跟着我走？", "很远", "窗边"),
@@ -349,10 +349,26 @@ class MvpUnitTests(unittest.TestCase):
         )
         for question, fact, invitation in examples:
             reply = _local_knowledge_reply(question, profile)
-            self.assertTrue(reply.startswith("小宝，"))
+            self.assertFalse(reply.startswith("小宝，"))
             self.assertIn(fact, reply)
             self.assertIn(invitation, reply)
             self.assertTrue(reply.endswith("？"))
+
+    def test_science_reply_starts_with_content_while_greetings_keep_nicknames(self) -> None:
+        profile = {"name": "测试宝", "enabled_activities": ["drawing", "story"]}
+        state = {"status": "active", "activity": "drawing", "step": 2, "topic": "恐龙"}
+        with patch.object(main_module, "_current_activity_state", return_value=state):
+            reply, transition = _activity_turn_reply("为什么月亮会跟着我走？", profile)
+        expected = "月亮离我们很远。走动时它看起来像在跟着你，要去窗边看看吗？"
+        self.assertEqual(reply, expected)
+        self.assertIsNone(transition)
+        self.assertEqual(_spoken_chunks(reply, "测试宝"), [
+            "月亮离我们很远。", "走动时它看起来像在跟着你，要去窗边看看吗？",
+        ])
+        self.assertTrue(_explicit_lesson_reply("带我一起画画吧", profile).startswith("测试宝，"))
+        self.assertTrue(_parent_message_reply({"text": "告诉宝宝爸爸想他。"}, profile).startswith("测试宝，"))
+        with patch.object(main_module, "memory", SimpleNamespace(get_continuity_cue=lambda: {"kind": "none"})):
+            self.assertTrue(main_module._welcome_back_reply(profile).startswith("测试宝，"))
 
     def test_vision_requests_keep_a_separate_timeout_budget(self) -> None:
         settings = SimpleNamespace(
@@ -497,7 +513,9 @@ class MvpUnitTests(unittest.TestCase):
 
         async def collect() -> list[dict]:
             result = []
-            async for chunk in main_module._stream_conversation("为什么鱼在水里不会淹死？"):
+            # Activity openings still use the cached nickname; routine science
+            # answers now start with their content instead.
+            async for chunk in main_module._stream_conversation("带我一起画画吧"):
                 for line in chunk.splitlines():
                     if line.startswith("data: "):
                         result.append(json.loads(line[6:]))

@@ -1090,7 +1090,9 @@ def _local_knowledge_reply(
         word in topic for word in ("为什么", "為什麼", "怎么", "怎麼", "哪里", "哪裡")
     ):
         reply = "云里的小水滴越来越大、越来越重，就会落下来变成雨。雨滴听起来像什么？"
-    return _personalize_reply(reply, profile) if reply else ""
+    # Ordinary questions can repeat within one conversation. Keep the answer
+    # direct; greetings, activity openings and parent messages address the child.
+    return reply
 
 
 def _continue_activity_reply(
