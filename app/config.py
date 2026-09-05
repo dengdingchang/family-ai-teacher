@@ -83,6 +83,9 @@ class Settings:
     tts_remote_retry_cooldown_seconds: float = 30.0
     tts_streaming_python: Path | None = None
     avatar_idle_path: Path | None = None
+    stt_device: str = "cpu"
+    stt_cuda_library_dir: Path | None = None
+    stt_fallback_model_path: Path | None = None
 
     @classmethod
     def load(cls) -> "Settings":
@@ -106,6 +109,11 @@ class Settings:
         tts_prompt_mode = os.getenv("TTS_PROMPT_MODE", "speaker_vector").strip().lower()
         if tts_prompt_mode not in {"speaker_vector", "icl"}:
             tts_prompt_mode = "speaker_vector"
+        stt_device = os.getenv("STT_DEVICE", "cpu").strip().lower()
+        if stt_device not in {"cpu", "cuda"}:
+            stt_device = "cpu"
+        stt_cuda_directory = os.getenv("STT_CUDA_LIBRARY_DIR", "").strip()
+        stt_fallback = os.getenv("STT_FALLBACK_MODEL_PATH", "").strip()
 
         return cls(
             project_root=PROJECT_ROOT,
@@ -135,6 +143,9 @@ class Settings:
             ),
             stt_language=os.getenv("STT_LANGUAGE", "zh").strip() or "zh",
             stt_compute_type=os.getenv("STT_COMPUTE_TYPE", "int8").strip() or "int8",
+            stt_device=stt_device,
+            stt_cuda_library_dir=Path(stt_cuda_directory).expanduser() if stt_cuda_directory else None,
+            stt_fallback_model_path=Path(stt_fallback).expanduser() if stt_fallback else None,
             tts_python=_path_env(
                 "TTS_PYTHON",
                 r"X:\AI\local\qwen3-tts-runtime311\.venv\Scripts\python.exe",
@@ -182,7 +193,11 @@ class Settings:
 
     @property
     def stt_ready(self) -> bool:
-        return self.stt_python.is_file() and self.stt_model_path.is_dir()
+        model_available = self.stt_model_path.is_dir() or (
+            self.stt_device == "cuda" and self.stt_fallback_model_path is not None
+            and self.stt_fallback_model_path.is_dir()
+        )
+        return self.stt_python.is_file() and model_available
 
     @property
     def tts_ready(self) -> bool:

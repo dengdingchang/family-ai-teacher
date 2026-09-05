@@ -102,3 +102,36 @@ def test_precancelled_cache_is_silent(monkeypatch):
     stop.set()
     with pytest.raises(TTSAdapterError, match="cancelled"):
         list(adapter.synthesize_stream("hello", cancel_event=stop))
+
+
+@pytest.mark.parametrize("handshake", ["ready", "error"])
+def test_worker_readiness_belongs_to_current_successful_model_handshake(monkeypatch, handshake):
+    settings = SimpleNamespace(project_root=Path.cwd(), tts_timeout_seconds=2,
+                               tts_model=Path("unused-model"), tts_ref_audio=Path("unused-reference"),
+                               tts_language="Chinese")
+    adapter = StreamingNathanTTSAdapter(settings)
+    process = Mock(stdin=io.StringIO(), stderr=io.StringIO())
+    process.poll.return_value = None
+    monkeypatch.setattr(StreamingNathanTTSAdapter, "ready", property(lambda self: True))
+    monkeypatch.setattr(adapter, "_environment", lambda: {})
+    monkeypatch.setattr("tts.streaming.subprocess.Popen", lambda *args, **kwargs: process)
+
+    def response(*args):
+        assert adapter._process is process
+        assert adapter.worker_ready is False
+        return json.dumps({"event": handshake})
+
+    monkeypatch.setattr(adapter, "_readline", response)
+    if handshake == "error":
+        with pytest.raises(TTSAdapterError):
+            adapter._start_process()
+        assert adapter.worker_ready is False
+    else:
+        adapter._start_process()
+        assert adapter.worker_ready is True
+        process.poll.return_value = 1
+        assert adapter.worker_ready is False
+        replacement = Mock()
+        replacement.poll.return_value = None
+        adapter._process = replacement
+        assert adapter.worker_ready is False

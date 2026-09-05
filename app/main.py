@@ -48,7 +48,17 @@ memory = MemoryStore(
     learning_events_path=settings.learning_events_path,
     template_path=settings.project_root / "config" / "child_profile.example.json",
 )
-stt = FasterWhisperCPUAdapter(settings)
+def _cuda_stt_start_allowed() -> bool:
+    if getattr(app.state, "tts_warmup", "not_started") != "ready":
+        return False
+    if settings.tts_mode == "streaming":
+        # Warmup is historical. The current process must also have completed
+        # its model-ready handshake, including when it is recovering.
+        return tts.worker_ready
+    return True
+
+
+stt = FasterWhisperCPUAdapter(settings, cuda_start_allowed=_cuda_stt_start_allowed)
 local_tts = (
     PersistentNathanTTSAdapter(settings)
     if settings.tts_mode == "persistent"
@@ -140,8 +150,19 @@ async def startup_tts_warmup() -> None:
     app.state.tts_warmup_task = asyncio.create_task(_warm_up_tts_with_recovery())
     async def prepare_recognition() -> None:
         try:
+            if getattr(settings, "stt_device", "cpu") == "cuda":
+                # Nathan's voice owns startup priority on the shared GPU. The
+                # adapter also checks readiness for requests arriving early.
+                await asyncio.shield(app.state.tts_warmup_task)
             await asyncio.to_thread(stt.warmup)
-        except STTAdapterError:
+            if (getattr(stt, "runtime_status", {}).get("device") == "cuda"
+                    and getattr(settings, "tts_mode", "") == "streaming"
+                    and tts.is_cached(ACKNOWLEDGEMENT_TEXT)):
+                # Initialize real decoder kernels before the first child turn,
+                # using only the acknowledgement already held in TTS RAM.
+                voice = await asyncio.to_thread(tts.synthesize, ACKNOWLEDGEMENT_TEXT, defer_avatar=True)
+                await asyncio.to_thread(stt.transcribe_bytes, voice.audio_bytes)
+        except (STTAdapterError, TTSAdapterError):
             logger.warning("Speech recognition warmup unavailable; retry on next input")
     app.state.stt_warmup_task = asyncio.create_task(prepare_recognition())
 
@@ -2334,6 +2355,7 @@ async def health() -> dict[str, Any]:
         "port": settings.app_port,
         "llm_configured": llm.configured,
         "stt_ready": stt.ready,
+        "stt_runtime": getattr(stt, "runtime_status", None),
         "tts_ready": tts.ready,
         "tts_mode": settings.tts_mode,
         "tts_prompt_mode": settings.tts_prompt_mode,

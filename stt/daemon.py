@@ -1,4 +1,4 @@
-"""Persistent CPU speech recognition with in-memory request/result transport."""
+"""Persistent local speech recognition with in-memory request/result transport."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import argparse
 import base64
 import contextlib
 import io
+import importlib.util
 import json
+from pathlib import Path
 import queue
 import sys
 import threading
@@ -17,17 +19,60 @@ def emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=True), flush=True)
 
 
+def _prepare_cuda(directory):
+    # The existing embedded Python has an isolated ._pth; sibling imports are
+    # not guaranteed. Load only this production helper by its absolute path.
+    spec = importlib.util.spec_from_file_location("stt_cuda_runtime", Path(__file__).with_name("cuda_runtime.py"))
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    return helper.prepare_cuda(directory)
+
+
+def load_model(args):
+    runtime = _prepare_cuda(args.cuda_library_dir) if args.device == "cuda" else None
+    from faster_whisper import WhisperModel
+    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type,
+                         cpu_threads=4, local_files_only=True)
+    if runtime is not None:
+        runtime.verify()
+    return model, runtime
+
+
+def _cuda_failure(exc):
+    if getattr(exc, "reason", None) == "cuda_dependencies_invalid":
+        return True
+    # Only native accelerator failures request a CPU retry. Decode/format
+    # exceptions remain per-input failures and leave a healthy GPU reusable.
+    return isinstance(exc, RuntimeError) and any(
+        token in str(exc).lower() for token in ("cuda", "cudnn", "cublas", "out of memory")
+    )
+
+
+def _startup_reason(exc):
+    reason = getattr(exc, "reason", None)
+    if reason in {"cuda_dependencies_invalid", "cuda_capacity_unavailable", "insufficient_vram"}:
+        return reason
+    return "cuda_start_failed"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
     parser.add_argument("--language", default="zh")
     parser.add_argument("--compute-type", default="int8")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--cuda-library-dir", default="")
     args = parser.parse_args()
     started = time.perf_counter()
-    with contextlib.redirect_stdout(sys.stderr):
-        from faster_whisper import WhisperModel
-        model = WhisperModel(args.model, device="cpu", compute_type=args.compute_type,
-                             cpu_threads=4, local_files_only=True)
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            model, cuda_runtime = load_model(args)
+        native_model = model.model
+        runtime_info = {"device": native_model.device, "compute_type": native_model.compute_type}
+    except Exception as exc:
+        emit({"event": "startup_error", "reason": _startup_reason(exc)})
+        return 1
+    cuda_inference_verified = False
 
     requests: queue.Queue = queue.Queue()
     cancellation: dict[str, threading.Event] = {}
@@ -55,7 +100,7 @@ def main() -> int:
         requests.put(None)
 
     threading.Thread(target=read_commands, name="stt-controls", daemon=True).start()
-    emit({"event": "ready", "load_s": round(time.perf_counter() - started, 3)})
+    emit({"event": "ready", "load_s": round(time.perf_counter() - started, 3), **runtime_info})
     while True:
         request = requests.get()
         if request is None or request.get("command") == "shutdown":
@@ -90,6 +135,9 @@ def main() -> int:
                     if stop.is_set():
                         break
                     text_parts.append(segment.text)
+                if cuda_runtime is not None and not cuda_inference_verified and not stop.is_set():
+                    cuda_runtime.verify()
+                    cuda_inference_verified = True
             if stop.is_set():
                 emit({"event": "cancelled", "id": request_id})
             else:
@@ -100,7 +148,8 @@ def main() -> int:
         except Exception as exc:
             # Decoder exception messages can contain media paths or transcript
             # fragments. Only an exception class crosses the protocol boundary.
-            emit({"event": "error", "id": request_id, "error": type(exc).__name__})
+            emit({"event": "error", "id": request_id, "error": type(exc).__name__,
+                  "retry_on_cpu": args.device == "cuda" and _cuda_failure(exc)})
         finally:
             if segments is not None:
                 close = getattr(segments, "close", None)

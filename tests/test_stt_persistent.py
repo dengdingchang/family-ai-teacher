@@ -17,7 +17,7 @@ def adapter_with_result(monkeypatch, payload):
     adapter = FasterWhisperCPUAdapter(SimpleNamespace(project_root=Path.cwd(), stt_language="zh"))
     process = Mock()
     process.poll.return_value = None
-    monkeypatch.setattr(adapter, "_ensure_process", lambda: process)
+    monkeypatch.setattr(adapter, "_ensure_process", lambda cancel_event=None: process)
     monkeypatch.setattr(adapter, "_send", Mock())
     adapter._responses.put(payload)
     return adapter, process

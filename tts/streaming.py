@@ -52,6 +52,7 @@ class StreamingNathanTTSAdapter(PersistentNathanTTSAdapter):
         self._cache_lock = threading.RLock()
         self._write_lock = threading.Lock()
         self.last_backend = "not_started"
+        self._ready_process = None
 
     @property
     def ready(self) -> bool:
@@ -68,7 +69,13 @@ class StreamingNathanTTSAdapter(PersistentNathanTTSAdapter):
         with self._cache_lock:
             return len(self._audio_cache)
 
+    @property
+    def worker_ready(self) -> bool:
+        process = self._ready_process
+        return process is not None and process is self._process and process.poll() is None
+
     def _start_process(self):
+        self._ready_process = None
         if not self.ready:
             raise TTSAdapterError("Existing isolated Nathan streaming runtime is unavailable")
         command = [str(self.python_path), str(self.settings.project_root / "tts/streaming_daemon.py"),
@@ -85,6 +92,7 @@ class StreamingNathanTTSAdapter(PersistentNathanTTSAdapter):
             response = json.loads(self._readline(process, self.settings.tts_timeout_seconds))
             if response.get("event") != "ready":
                 raise TTSAdapterError("Nathan streaming worker did not become ready")
+            self._ready_process = process
         except Exception as exc:
             self._close_process()
             raise TTSAdapterError("Nathan streaming worker could not initialize") from exc

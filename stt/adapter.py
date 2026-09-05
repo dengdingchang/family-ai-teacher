@@ -24,6 +24,16 @@ class STTAdapterError(RuntimeError):
     pass
 
 
+class _CudaWorkerError(STTAdapterError):
+    """Internal signal: retry in a fresh CPU worker, never expose diagnostics."""
+
+
+_FALLBACK_REASONS = {
+    "tts_not_ready", "cuda_dependencies_invalid", "cuda_capacity_unavailable",
+    "insufficient_vram", "cuda_start_failed", "cuda_worker_stopped", "cuda_inference_failed",
+}
+
+
 @dataclass(frozen=True)
 class STTResult:
     text: str
@@ -47,7 +57,7 @@ def _stderr_tail(stderr: str, limit: int = 280) -> str:
 
 
 class FasterWhisperCPUAdapter:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, cuda_start_allowed=None) -> None:
         self.settings = settings
         self.worker = settings.project_root / "stt" / "daemon.py"
         self._process: subprocess.Popen[str] | None = None
@@ -55,7 +65,21 @@ class FasterWhisperCPUAdapter:
         self._lock = threading.RLock()
         self._request_number = 0
         self._shutdown_requested = threading.Event()
+        self._cuda_start_allowed = cuda_start_allowed or (lambda: True)
+        self._cuda_disabled_reason: str | None = None
+        self._runtime = {"backend": "faster-whisper", "status": "not_started",
+                         "device": None, "compute_type": None, "fallback_reason": None}
         atexit.register(self.shutdown)
+
+    @property
+    def runtime_status(self) -> dict:
+        status = dict(self._runtime)
+        status["requested_device"] = getattr(self.settings, "stt_device", "cpu")
+        status["fallback_reason"] = self._cuda_disabled_reason
+        process = self._process
+        if status["status"] == "ready" and (process is None or process.poll() is not None):
+            status["status"] = "stopped"
+        return status
 
     @property
     def ready(self) -> bool:
@@ -85,21 +109,51 @@ class FasterWhisperCPUAdapter:
                 except OSError:
                     pass
 
-    def _start_process(self) -> subprocess.Popen[str]:
+    def _start_process(self, cancel_event=None) -> subprocess.Popen[str]:
+        self._check_cancelled(cancel_event)
         if not self.ready:
-            raise STTAdapterError("Existing faster-whisper CPU runtime or model is not available")
+            raise STTAdapterError("Existing faster-whisper runtime or model is not available")
+        requested = getattr(self.settings, "stt_device", "cpu")
+        if requested == "cuda" and self._cuda_disabled_reason is None:
+            if not self._cuda_start_allowed():
+                self._disable_cuda("tts_not_ready")
+            else:
+                try:
+                    return self._launch_process("cuda", self.settings.stt_model_path,
+                                                self.settings.stt_compute_type)
+                except STTAdapterError:
+                    self._check_cancelled(cancel_event)
+                    self._disable_cuda(self._cuda_disabled_reason or "cuda_start_failed")
+        self._check_cancelled(cancel_event)
+        if requested == "cuda":
+            fallback = getattr(self.settings, "stt_fallback_model_path", None)
+            if fallback is None or not Path(fallback).is_dir():
+                self._runtime["status"] = "failed"
+                raise STTAdapterError("STT CPU fallback model is not available")
+            return self._launch_process("cpu", fallback, "int8")
+        return self._launch_process("cpu", self.settings.stt_model_path, self.settings.stt_compute_type)
+
+    def _disable_cuda(self, reason: str) -> None:
+        self._cuda_disabled_reason = reason if reason in _FALLBACK_REASONS else "cuda_start_failed"
+        self._close_process()
+
+    def _launch_process(self, device: str, model_path: Path, compute_type: str) -> subprocess.Popen[str]:
+        self._runtime.update(status="starting", device=None, compute_type=None)
         command = [
             str(self.settings.stt_python),
             "-E",
             "-s",
             str(self.worker),
             "--model",
-            str(self.settings.stt_model_path),
+            str(model_path),
             "--language",
             self.settings.stt_language,
             "--compute-type",
-            self.settings.stt_compute_type,
+            compute_type,
+            "--device", device,
         ]
+        if device == "cuda":
+            command.extend(["--cuda-library-dir", str(getattr(self.settings, "stt_cuda_library_dir", None) or "")])
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)
         environment.pop("PYTHONHOME", None)
@@ -114,6 +168,7 @@ class FasterWhisperCPUAdapter:
                 env=environment, bufsize=1, **_hidden_process_kwargs(),
             )
         except OSError as exc:
+            self._runtime["status"] = "failed"
             raise STTAdapterError("STT worker could not start") from exc
         self._process = process
         responses: queue.Queue = queue.Queue()
@@ -132,8 +187,18 @@ class FasterWhisperCPUAdapter:
         try:
             payload = self._next_payload(30)
             if payload.get("event") != "ready":
+                if device == "cuda":
+                    reason = payload.get("reason")
+                    self._cuda_disabled_reason = reason if reason in _FALLBACK_REASONS else "cuda_start_failed"
                 raise STTAdapterError("STT worker did not become ready")
+            # Older CPU workers did not include device metadata.
+            actual_device = payload.get("device", device)
+            actual_compute = payload.get("compute_type", compute_type)
+            if actual_device != device or actual_compute not in {"int8", "int8_float16", "int8_float32", "float16", "float32"}:
+                raise STTAdapterError("STT worker returned invalid runtime metadata")
+            self._runtime.update(status="ready", device=actual_device, compute_type=actual_compute)
         except STTAdapterError:
+            self._runtime["status"] = "failed"
             self._close_process()
             raise
         return process
@@ -147,10 +212,12 @@ class FasterWhisperCPUAdapter:
             raise STTAdapterError("STT worker stopped before returning a result")
         return payload
 
-    def _ensure_process(self) -> subprocess.Popen[str]:
+    def _ensure_process(self, cancel_event=None) -> subprocess.Popen[str]:
         if self._process is None or self._process.poll() is not None:
+            if self._process is not None and self._runtime["device"] == "cuda":
+                self._disable_cuda("cuda_worker_stopped")
             self._close_process()
-            return self._start_process()
+            return self._start_process(cancel_event)
         return self._process
 
     def _send(self, process, payload: dict) -> None:
@@ -160,7 +227,10 @@ class FasterWhisperCPUAdapter:
             process.stdin.write(json.dumps(payload, ensure_ascii=True) + "\n")
             process.stdin.flush()
         except (OSError, ValueError) as exc:
+            was_cuda = self._runtime["device"] == "cuda"
             self._close_process()
+            if was_cuda:
+                raise _CudaWorkerError("cuda_worker_stopped") from exc
             raise STTAdapterError("STT worker input failed") from exc
 
     def _check_cancelled(self, cancel_event=None) -> None:
@@ -180,11 +250,26 @@ class FasterWhisperCPUAdapter:
         started = time.perf_counter()
         while not self._lock.acquire(timeout=0.05):
             self._check_cancelled(cancel_event)
+        try:
+            for attempt in range(2):
+                try:
+                    return self._transcribe_request(audio, cancel_event, started)
+                except _CudaWorkerError as exc:
+                    self._check_cancelled(cancel_event)
+                    if attempt or self._cuda_disabled_reason is not None:
+                        raise STTAdapterError("STT worker stopped before returning a result") from None
+                    self._disable_cuda(str(exc))
+        finally:
+            self._lock.release()
+
+    def _transcribe_request(self, audio: bytes, cancel_event, started: float) -> STTResult:
+        # Caller holds the lock across a possible GPU -> CPU retry. A new
+        # process owns a new response queue and a new request id.
         process = None
         terminal = False
         try:
             self._check_cancelled(cancel_event)
-            process = self._ensure_process()
+            process = self._ensure_process(cancel_event)
             self._check_cancelled(cancel_event)
             self._request_number += 1
             request_id = str(self._request_number)
@@ -198,16 +283,22 @@ class FasterWhisperCPUAdapter:
                     deadline = min(deadline, time.monotonic() + 3)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    if not cancelled and self._runtime["device"] == "cuda":
+                        raise _CudaWorkerError("cuda_inference_failed")
                     raise STTAdapterError("Speech recognition was cancelled" if cancelled else "STT timed out")
                 try:
                     payload = self._responses.get(timeout=min(.05, remaining))
                 except queue.Empty:
                     continue
+                if payload is None and self._runtime["device"] == "cuda":
+                    raise _CudaWorkerError("cuda_worker_stopped")
                 if not isinstance(payload, dict) or str(payload.get("id")) != request_id:
                     raise STTAdapterError("STT worker returned an invalid response")
                 terminal = payload.get("event") in {"transcript", "cancelled", "error"}
                 self._check_cancelled(cancel_event)
                 if payload.get("event") == "error":
+                    if self._runtime["device"] == "cuda" and payload.get("retry_on_cpu") is True:
+                        raise _CudaWorkerError("cuda_inference_failed")
                     raise STTAdapterError("STT could not decode this audio")
                 if payload.get("event") != "transcript":
                     raise STTAdapterError("STT worker returned no transcript")
@@ -222,7 +313,6 @@ class FasterWhisperCPUAdapter:
         finally:
             if process is not None and not terminal:
                 self._close_process()
-            self._lock.release()
 
     def _close_process(self) -> None:
         process, self._process = self._process, None
