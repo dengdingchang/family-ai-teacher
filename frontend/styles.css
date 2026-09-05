@@ -407,6 +407,13 @@ h2 {
 #avatarStage[data-state="speaking"] .voice-bars i:nth-child(3n) {
   animation-delay: -500ms;
 }
+#avatarStage[data-state="listening"] .voice-bars i {
+  transform: scaleY(calc(0.3 + 0.7 * var(--listening-level, 0)));
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+#avatarStage[data-state="listening"] .voice-bars i:nth-child(2n) {
+  transform: scaleY(calc(0.3 + 0.5 * var(--listening-level, 0)));
+}
 #avatarStage[data-state="listening"] .dad-video .video-frame {
   outline: 3px solid oklch(0.6 0.085 157);
   outline-offset: 2px;
@@ -983,6 +990,10 @@ h2 {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  #avatarStage[data-state="listening"] .voice-bars i,
+  #avatarStage[data-state="listening"] .voice-bars i:nth-child(2n) {
+    transform: scaleY(0.3);
+  }
   *,
   *::before,
   *::after {

@@ -209,8 +209,24 @@ function setStatus(message, state = "idle") {
   statusText.textContent = message;
   const visualState = ["idle", "listening", "thinking", "speaking", "offline"].includes(state) ? state : "idle";
   if (avatarStage) avatarStage.dataset.state = visualState;
+  if (visualState !== "listening") resetListeningLevel();
   dot.classList.toggle("live", visualState !== "offline");
   syncAvatarIdle(visualState);
+}
+
+function resetListeningLevel() {
+  avatarStage?.style?.removeProperty("--listening-level");
+}
+
+function updateListeningLevel(rms) {
+  if (avatarStage?.dataset.state !== "listening" || avatarReducedMotion.matches) {
+    resetListeningLevel();
+    return;
+  }
+  // Visual loudness only: this does not change VAD or recognition confidence.
+  const level = Number.isFinite(rms) ? Math.max(0, Math.min(1, (rms - 0.015) / 0.135)) : 0;
+  if (level === 0) resetListeningLevel();
+  else avatarStage.style.setProperty("--listening-level", level.toFixed(3));
 }
 
 function syncAvatarIdle(state = avatarStage?.dataset.state || "idle") {
@@ -250,7 +266,10 @@ function initializeAvatarIdle() {
     avatarIdleFailed = true;
     syncAvatarIdle();
   });
-  avatarReducedMotion.addEventListener("change", () => syncAvatarIdle());
+  avatarReducedMotion.addEventListener("change", () => {
+    resetListeningLevel();
+    syncAvatarIdle();
+  });
   document.addEventListener("visibilitychange", () => syncAvatarIdle());
   window.addEventListener("pagehide", () => avatarIdle.pause());
   if (avatarIdle.readyState >= 2) avatarIdleReady = true;
@@ -1151,6 +1170,7 @@ function checkVoiceActivity() {
   if (!conversationActive || !inputAnalyser || !segmentRecording) return;
   const now = performance.now();
   const rms = inputRms();
+  updateListeningLevel(rms);
   if (rms >= VAD_START_RMS) {
     if (!loudSince) loudSince = now;
     lastVoiceAt = now;
@@ -1210,6 +1230,7 @@ function pcmToWav(chunks, sampleRate) {
 
 function beginContinuousSegment(initialChunks = [], alreadySpeaking = false) {
   if (!conversationActive || !recordingStream || segmentRecording) return;
+  resetListeningLevel();
   stopBargeInMonitor();
   segmentPcmChunks = initialChunks.slice();
   segmentRecording = true;
@@ -1242,6 +1263,7 @@ function finishContinuousSegment() {
 }
 
 function releaseInputStream() {
+  resetListeningLevel();
   stopVadLoop();
   stopBargeInMonitor();
   segmentRecording = false;
