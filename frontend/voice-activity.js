@@ -1,6 +1,6 @@
 (function (root) {
   class BargeInGate {
-    constructor({ threshold = 0.075, voicedMs = 260, sampleMs = 80, maxGapMs = 200, windowMs = 800 } = {}) {
+    constructor({ threshold = 0.075, voicedMs = 240, sampleMs = 40, maxGapMs = 200, windowMs = 800 } = {}) {
       Object.assign(this, { threshold, voicedMs, sampleMs, maxGapMs, windowMs });
       this.reset();
     }

@@ -1,5 +1,5 @@
 import "/pcm-player.js?v=20260906-stream1";
-import "/voice-activity.js?v=20260906-1";
+import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
 
 const statusText = document.querySelector("#statusText");
@@ -86,7 +86,8 @@ const VAD_START_HOLD_MS = 140;
 const VAD_SILENCE_MS = 850;
 const VAD_MAX_SEGMENT_MS = 12000;
 const BARGE_IN_START_RMS = 0.075;
-const BARGE_IN_HOLD_MS = 260;
+const BARGE_IN_HOLD_MS = 240;
+const BARGE_IN_INTERVAL_MS = 40;
 const BARGE_IN_PREROLL_CHUNKS = 6;
 // A measured relay path adds about 0.5 s round-trip latency. Keep this wait
 // bounded, while allowing its first decodable video packet to arrive.
@@ -94,7 +95,7 @@ const STREAM_AVATAR_FIRST_FRAME_WAIT_MS = 2000;
 const bargeInGate = new globalThis.BargeInGate({
   threshold: BARGE_IN_START_RMS,
   voicedMs: BARGE_IN_HOLD_MS,
-  sampleMs: VAD_INTERVAL_MS,
+  sampleMs: BARGE_IN_INTERVAL_MS,
 });
 
 let historyRecords = [];
@@ -1095,7 +1096,7 @@ function stopBargeInMonitor() {
 function scheduleBargeInCheck() {
   if (!bargeInMonitoring || !conversationActive || segmentRecording) return;
   if (bargeInTimer) clearTimeout(bargeInTimer);
-  bargeInTimer = setTimeout(checkBargeIn, VAD_INTERVAL_MS);
+  bargeInTimer = setTimeout(checkBargeIn, BARGE_IN_INTERVAL_MS);
 }
 
 function startBargeInMonitor() {
