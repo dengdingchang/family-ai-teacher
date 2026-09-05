@@ -739,6 +739,32 @@ select:focus {
 .journal-entry .journal-candidate {
   color: oklch(0.46 0.07 61);
 }
+.journal-entry .companionship-note {
+  color: var(--ink);
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+.companionship-note summary {
+  color: var(--accent);
+  cursor: pointer;
+  padding-block: 8px;
+}
+.companionship-note .companionship-source {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+.companionship-note ol {
+  padding-left: 20px;
+  margin: 0 0 10px;
+}
+.companionship-note time {
+  color: var(--muted);
+  font-size: 11px;
+}
+.companionship-note ol p {
+  margin: 2px 0 8px;
+}
 .privacy-footer {
   font-size: 11px;
   line-height: 1.8;

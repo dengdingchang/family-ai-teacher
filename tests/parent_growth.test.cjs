@@ -38,6 +38,7 @@ function setup() {
   vm.runInContext(
     source.slice(source.indexOf('const statusLabels ='), source.indexOf('const defaultActivities ='))
     + '\nlet allJournal = []; let journalVisible = 4;\n'
+    + source.slice(source.indexOf('function formatTime('), source.indexOf('function listText('))
     + source.slice(source.indexOf('function skillStatusLabel('), source.indexOf('function renderMemories('))
     + source.slice(source.indexOf('function renderJournal('), source.indexOf('async function loadDashboard(')),
     context,
@@ -45,7 +46,7 @@ function setup() {
   const select = () => byId('skillGroups').children[0].children[1].children[2];
   const practicingLabel = () => select().options.find((option) => option.value === 'practicing').textContent;
   const facts = () => byId('journalContent').children[0].children[1].children.map((item) => item.textContent).join('\n');
-  return { context, apiState, select, practicingLabel, facts, recoveryNotice: () => byId('skillRecoveryNotice') };
+  return { context, apiState, select, practicingLabel, facts, journalRoot: () => byId('journalContent'), recoveryNotice: () => byId('skillRecoveryNotice') };
 }
 
 function skill(reviewed = false) {
@@ -109,4 +110,34 @@ test('a damaged learning graph is visibly provisional and cannot submit edits un
   context.renderSkills({ skills: [skill()], recovery_required: false });
   assert.equal(recoveryNotice().hidden, true);
   assert.equal(select().disabled, false);
+});
+
+test('journal shows repeated family requests with expandable dated source text, without inventing emotions', () => {
+  const { context, journalRoot } = setup();
+  const request = { family_member: '爸爸', activity: '搭积木', count: 3,
+    examples: [1, 2, 3].map(day => ({text: '我想和爸爸一起搭积木', created_at: `2026-09-0${day}T08:00:00Z`})) };
+  context.renderJournal([{ week: '2026-W36', companionship_requests: [request] }]);
+  const texts = element => [element.textContent, ...element.children.map(texts)].join('\n');
+  const content = texts(journalRoot());
+  assert.match(content, /本周 3 次提到：想和爸爸一起搭积木/);
+  assert.match(content, /最近 3 条已完成对话的文字记录/);
+  assert.equal((content.match(/“我想和爸爸一起搭积木”/g) || []).length, 3);
+  assert.doesNotMatch(content, /孤独|失落|没有回应|没有形成足够/);
+  const note = journalRoot().children[0].children[1].children[0];
+  assert.equal(note.children[0].tag, 'details');
+  assert.notEqual(note.children[0].open, true);
+  assert.deepEqual(note.children[0].children[2].children.map(item => item.children[0].dateTime), request.examples.map(item => item.created_at));
+});
+
+test('journal ignores malformed or unsupported family aggregates and preserves source markup as text', () => {
+  const { context, journalRoot } = setup();
+  const examples = [{text: '<script>doNotRun()</script>', created_at: '2026-09-03T08:00:00Z'}];
+  const valid = {family_member: '妈妈', activity: '画画', count: 3, examples};
+  context.renderJournal([{week:'2026-W36', companionship_requests: [null, {...valid,count:2}, {...valid,family_member:'爸爸老师'}, {...valid,examples:[{text:'missing date'}]}, valid]}]);
+  const notes = journalRoot().children[0].children[1].children;
+  assert.equal(notes.length, 1);
+  const words = notes[0].children[0].children[2].children[0].children[1];
+  assert.equal(words.tag, 'p');
+  assert.equal(words.textContent, '“<script>doNotRun()</script>”');
+  assert.equal(words.children.length, 0);
 });

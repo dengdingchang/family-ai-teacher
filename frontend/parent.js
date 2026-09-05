@@ -515,6 +515,44 @@ function renderJournal(journal) {
   renderJournalPage();
 }
 
+function appendCompanionshipRequests(list, requests) {
+  let rendered = 0;
+  for (const request of Array.isArray(requests) ? requests : []) {
+    if (!request || !["爸爸", "妈妈"].includes(request.family_member)
+        || !Number.isInteger(request.count) || request.count < 3
+        || typeof request.activity !== "string" || !text(request.activity)) continue;
+    const examples = (Array.isArray(request.examples) ? request.examples : [])
+      .filter(example => example && typeof example.text === "string" && text(example.text)
+        && typeof example.created_at === "string" && text(example.created_at)
+        && formatTime(example.created_at)).slice(-3);
+    if (!examples.length) continue;
+    const item = document.createElement("li");
+    item.className = "companionship-note";
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = `本周 ${request.count} 次提到：想和${request.family_member}一起${text(request.activity)}`;
+    const source = document.createElement("p");
+    source.className = "companionship-source";
+    source.textContent = `最近 ${examples.length} 条已完成对话的文字记录`;
+    const quotes = document.createElement("ol");
+    for (const example of examples) {
+      const quote = document.createElement("li");
+      const time = document.createElement("time");
+      time.dateTime = example.created_at;
+      time.textContent = formatTime(example.created_at);
+      const words = document.createElement("p");
+      words.textContent = `“${text(example.text)}”`;
+      quote.append(time, words);
+      quotes.append(quote);
+    }
+    details.append(summary, source, quotes);
+    item.append(details);
+    list.append(item);
+    rendered++;
+  }
+  return rendered;
+}
+
 function renderJournalPage() {
   const journal = allJournal;
   const root = byId("journalContent");
@@ -535,6 +573,7 @@ function renderJournalPage() {
     const title = document.createElement("summary");
     title.textContent = `${entry.week} · ${entry.summary || `${entry.conversation_turns || 0} 轮互动`}`;
     const list = document.createElement("ul");
+    const companionshipCount = appendCompanionshipRequests(list, entry.companionship_requests);
     const facts = [
       ...(entry.learning_progress || [])
         .slice(0, 4)
@@ -556,7 +595,7 @@ function renderJournalPage() {
         .map((value) => `真实观察：${value}`),
       entry.recommendation ? `下一步：${entry.recommendation}` : "",
     ].filter(Boolean);
-    if (!facts.length) facts.push("这一周还没有形成足够的成长证据。");
+    if (!facts.length && !companionshipCount) facts.push("这一周还没有形成足够的成长证据。");
     for (const fact of facts) {
       const item = document.createElement("li");
       item.textContent = fact;

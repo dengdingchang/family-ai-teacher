@@ -916,6 +916,32 @@ class MemoryStore:
         return clean.strip(" “”,，。")[:120]
 
     @staticmethod
+    def _companionship_request(text: str) -> tuple[str, str] | None:
+        """Recognize a direct wish with a short activity phrase, not reported speech.
+
+        Deliberately exclude compound/relative clauses and activity synonyms.
+        A vocative to the AI is allowed; the requested companion must be a parent.
+        """
+        statement = re.sub(r"^(?:爸爸老师|爸爸老師)[，,：:]\s*", "", text)
+        compact = re.sub(r"\s+", "", statement)
+        # Restrict this first version to plain affirmative statements. These
+        # grammatical markers also exclude wishes being quoted or discussed
+        # as a fulfilled example (e.g. '...的愿望已经实现了').
+        if re.search(r'''[?？“”"‘’'「」『』不没沒别別吗嗎呢么麼麽的是了]''', compact):
+            return None
+        match = re.fullmatch(
+            r"(?:我(?:还|還)?(?:想|希望)|(?:还|還)想|希望)(?:要)?(?:和|跟)"
+            r"(爸爸|妈妈|媽媽)一起([\u3400-\u9fffA-Za-z0-9]{1,20})[。.!！]*",
+            compact,
+        )
+        if match is None:
+            return None
+        member, activity = match.groups()
+        if re.search(r"(?:说|說|讲|講|问|問|告诉|告訴)$", activity):
+            return None
+        return ("妈妈" if member == "媽媽" else member), activity
+
+    @staticmethod
     def _journal_bucket(buckets: dict[str, dict[str, Any]], timestamp: datetime) -> dict[str, Any]:
         year, week, _ = timestamp.isocalendar()
         key = f"{year}-W{week:02d}"
@@ -933,6 +959,7 @@ class MemoryStore:
                 "skill_reviews": [],
                 "observations": [],
                 "parent_connections": [],
+                "_companionship_groups": {},
                 "skill_counts": {},
                 "number_practice": {},
             },
@@ -942,6 +969,7 @@ class MemoryStore:
         """Rebuild every weekly journal from append-only structured family data."""
 
         buckets: dict[str, dict[str, Any]] = {}
+        seen_companionship_records: set[tuple[str, ...]] = set()
         now = datetime.now().astimezone()
         self._journal_bucket(buckets, now)
 
@@ -954,6 +982,17 @@ class MemoryStore:
             bucket["active_days"].add(timestamp.date().isoformat())
             user_text = self._clean_text(record.get("user_text"))
             assistant_text = self._clean_text(record.get("assistant_text"))
+            request = self._companionship_request(user_text)
+            if request is not None:
+                record_id = record.get("id") or record.get("turn_id")
+                identity = (("id", record_id) if isinstance(record_id, str) and record_id else
+                            ("content", str(record.get("created_at")),
+                             str(record.get("user_text", "")), str(record.get("assistant_text", ""))))
+                if identity not in seen_companionship_records:
+                    seen_companionship_records.add(identity)
+                    bucket["_companionship_groups"].setdefault(request, []).append((timestamp, {
+                        "text": user_text, "created_at": record.get("created_at"),
+                    }))
             combined = f"{user_text} {assistant_text}".casefold()
             for topic in INTEREST_TOPICS:
                 if topic.casefold() in combined:
@@ -1036,6 +1075,14 @@ class MemoryStore:
         journals: list[dict[str, Any]] = []
         for week_key in sorted(buckets):
             bucket = buckets[week_key]
+            request_groups = bucket.pop("_companionship_groups")
+            repeated_requests = [(key, sorted(values, key=lambda item: item[0]))
+                                 for key, values in request_groups.items() if len(values) >= 3]
+            bucket["companionship_requests"] = [
+                {"family_member": key[0], "activity": key[1], "count": len(values),
+                 "examples": [example for _, example in values[-3:]]}
+                for key, values in sorted(repeated_requests, key=lambda item: item[1][-1][0], reverse=True)
+            ]
             counts = bucket.pop("skill_counts")
             number_practice = bucket.pop("number_practice")
             bucket["practice_results"] = list(number_practice.values())

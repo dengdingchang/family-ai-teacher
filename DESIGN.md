@@ -38,6 +38,8 @@ The memory library fetches the complete local collection independently of the da
 
 Weekly journals and parent messages begin with four entries. The earlier-record control expands the complete archive without discarding past years or older child responses. Confirmed skill reviews include the parent’s supporting observation. Important journal facts remain accessible even when a week has many events.
 
+Repeated explicit wishes to spend time with Dad or Mom appear first among that week's facts. Keep the count visible and the three most recent dated source quotes in a native expandable section. Present recorded wishes without diagnosing emotions or assuming that a parent has not responded.
+
 ## Verification boundaries
 
 Visual and interaction QA uses local browsers without real microphone or camera capture. Synthetic fixtures are browser route responses, never saved to the family database. Screenshots are review evidence under `runtime/`. Physical voice quality, camera understanding and real-time lip synchronization require their own end-to-end evidence.
