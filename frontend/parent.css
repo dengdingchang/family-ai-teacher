@@ -364,6 +364,16 @@ h3 {
 .skill-domain h3 {
   margin: 0 0 13px;
 }
+.skill-recovery-notice {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff3e3;
+  color: #704925;
+  font-size: 13px;
+  line-height: 1.7;
+}
 .skill-row {
   display: grid;
   grid-template-columns: minmax(110px, 1fr) minmax(120px, 1.2fr) 120px;

@@ -134,9 +134,13 @@ class MemoryStore:
         # replacing years of data with a default returned by a tolerant read.
         if path.is_file():
             try:
-                json.loads(path.read_text(encoding="utf-8"))
+                previous = json.loads(path.read_text(encoding="utf-8"))
             except (UnicodeError, json.JSONDecodeError) as exc:
                 raise OSError("Family data needs recovery before updates") from exc
+            if path == self.skills_path and not self._valid_skill_graph(previous):
+                raise OSError("Skill data needs recovery before updates")
+        if path == self.skills_path:
+            value = {key: item for key, item in value.items() if key != "recovery_required"}
         self.data_dir.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f"{path.name}.tmp")
         temporary.write_text(
@@ -450,28 +454,74 @@ class MemoryStore:
             "keywords": list(keywords),
         }
 
+    @staticmethod
+    def _valid_skill_entry(item: Any) -> bool:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"]:
+            return False
+        for key in ("domain", "name", "status", "last_evidence"):
+            if key in item and not isinstance(item[key], str):
+                return False
+        if "status" in item and item["status"] not in SKILL_STATUSES:
+            return False
+        for key in ("practice_count", "evidence_count"):
+            if key in item and (type(item[key]) is not int or item[key] < 0):
+                return False
+        if "mastery_score" in item and (
+            type(item["mastery_score"]) not in (int, float) or not 0 <= item["mastery_score"] <= 1
+        ):
+            return False
+        for key in ("last_practiced_at", "parent_reviewed_at"):
+            if key in item and item[key] is not None and not isinstance(item[key], str):
+                return False
+        if "keywords" in item and (
+            not isinstance(item["keywords"], list) or not all(isinstance(word, str) for word in item["keywords"])
+        ):
+            return False
+        return True
+
+    @classmethod
+    def _valid_skill_graph(cls, value: Any) -> bool:
+        return (isinstance(value, dict) and isinstance(value.get("skills"), list)
+                and all(cls._valid_skill_entry(item) for item in value["skills"])
+                and len({item["id"] for item in value["skills"]}) == len(value["skills"]))
+
     def get_skill_graph(self) -> dict[str, Any]:
         with self._lock:
-            value = self._read_json(self.skills_path, {})
-            raw_skills = value.get("skills", []) if isinstance(value, dict) else []
-            existing = {
-                str(item.get("id")): item
-                for item in raw_skills
-                if isinstance(item, dict) and item.get("id")
-            }
-            changed = not isinstance(value, dict) or not isinstance(value.get("skills"), list)
-            for definition in DEFAULT_SKILLS:
-                if definition[0] not in existing:
-                    existing[definition[0]] = self._default_skill(*definition)
-                    changed = True
+            source_exists = self.skills_path.exists()
+            value = self._read_json(self.skills_path, None)
+            raw_skills = value.get("skills") if isinstance(value, dict) else None
+            defaults = {definition[0]: self._default_skill(*definition) for definition in DEFAULT_SKILLS}
+            seen_ids, duplicate_ids = set(), set()
+            for item in raw_skills if isinstance(raw_skills, list) else []:
+                skill_id = item.get("id") if isinstance(item, dict) else None
+                if isinstance(skill_id, str):
+                    if skill_id in seen_ids:
+                        duplicate_ids.add(skill_id)
+                    seen_ids.add(skill_id)
+            existing = {}
+            for item in raw_skills if isinstance(raw_skills, list) else []:
+                # A duplicate ID has no trustworthy winning assessment. Keep
+                # its source untouched and use only a provisional default.
+                if self._valid_skill_entry(item) and item["id"] not in duplicate_ids:
+                    baseline = defaults.get(item["id"]) or self._default_skill(item["id"], "其他", item["id"], ())
+                    existing[item["id"]] = {**baseline, **item}
+            for skill_id, default in defaults.items():
+                existing.setdefault(skill_id, default)
             graph = {
                 "version": 1,
                 "updated_at": value.get("updated_at") if isinstance(value, dict) else None,
                 "skills": list(existing.values()),
             }
-            if changed:
+            changed = graph["skills"] != raw_skills
+            if changed and (not source_exists or self._valid_skill_graph(value)):
                 graph["updated_at"] = _now()
-                self._write_json(self.skills_path, graph)
+                try:
+                    self._write_json(self.skills_path, graph)
+                except OSError:
+                    # Read-only or unavailable storage must not block the dashboard
+                    # or conversation. Explicit updates still report write failure.
+                    pass
+            graph["recovery_required"] = source_exists and not self._valid_skill_graph(value)
             return json.loads(json.dumps(graph, ensure_ascii=False))
 
     def update_skill(self, skill_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -937,15 +987,21 @@ class MemoryStore:
                 if (timestamp is not None and isinstance(attempt, dict)
                         and attempt.get("source") == "local_number_activity"
                         and attempt.get("activity") == "numbers"
-                        and attempt.get("result") in {"correct", "incorrect"}
-                        and attempt.get("question_id") and attempt.get("question")):
+                        and attempt.get("result") in ("correct", "incorrect")
+                        and isinstance(attempt.get("question_id"), str) and attempt["question_id"].strip()
+                        and isinstance(attempt.get("question"), str) and attempt["question"].strip()):
                     checks = self._journal_bucket(buckets, timestamp)["number_practice"]
                     check = checks.setdefault(str(attempt["question_id"]), {
+                        "source": "local_number_activity", "activity": "numbers",
+                        "question_id": str(attempt["question_id"]),
+                        "skill_id": self._clean_text(attempt.get("skill_id"), 80),
                         "question": self._clean_text(attempt["question"], 80),
-                        "correct": 0, "incorrect": 0, "last_result": "",
+                        "correct": 0, "incorrect": 0, "last_result": "", "last_at": "",
                     })
                     check[attempt["result"]] += 1
-                    check["last_result"] = attempt["result"]
+                    if not check["last_at"] or timestamp >= datetime.fromisoformat(check["last_at"]):
+                        check["last_result"] = attempt["result"]
+                        check["last_at"] = timestamp.isoformat()
                 continue
             if event.get("event_type") == "skill_review":
                 timestamp = self._local_datetime(event.get("created_at"))
@@ -977,12 +1033,12 @@ class MemoryStore:
                 8,
             )
 
-        previous_counts: dict[str, int] = {}
         journals: list[dict[str, Any]] = []
         for week_key in sorted(buckets):
             bucket = buckets[week_key]
             counts = bucket.pop("skill_counts")
             number_practice = bucket.pop("number_practice")
+            bucket["practice_results"] = list(number_practice.values())
             repeated_difficulties = [check for check in number_practice.values() if check["incorrect"] >= 3]
             for check in repeated_difficulties:
                 latest = "最近一次已答对" if check["last_result"] == "correct" else "最近一次仍需再试"
@@ -993,9 +1049,10 @@ class MemoryStore:
                 )
             progress = []
             for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
-                previous = int(previous_counts.get(name, 0))
-                progress.append({"name": name, "turns": count, "trend": "↑" if count > previous else "→"})
-            previous_counts = counts
+                # Retain the old string field for clients, but retire arrows:
+                # more topic mentions cannot establish an ability improvement.
+                progress.append({"name": name, "turns": count, "trend": "",
+                                 "trend_deprecated": True, "source": "topic_exposure"})
             bucket["active_days"] = len(bucket["active_days"])
             bucket["observations"] = bucket["observations"][-3:]
             bucket["learning_progress"] = progress

@@ -177,7 +177,24 @@ function renderProfile(profile, brain) {
   byId("brainSummary").textContent = "爸爸来决定";
 }
 
+function skillStatusLabel(status, parentReviewed = true) {
+  if (status === "practicing" && !parentReviewed) return "持续接触";
+  return statusLabels[status] || status;
+}
+
+function formatSkillReview(review) {
+  // Old receipts do not say whether the previous state was parent-assessed.
+  const previous = review.previous_status === "practicing"
+    ? "接触或练习中" : skillStatusLabel(review.previous_status);
+  const change = review.previous_status && review.previous_status !== review.status
+    ? `${previous} → ` : "";
+  return `爸爸确认：${review.name} · ${change}${skillStatusLabel(review.status)}${review.evidence ? `（${review.evidence}）` : ""}`;
+}
+
 function renderSkills(graph) {
+  const recoveryRequired = graph.recovery_required === true;
+  const recoveryNotice = byId("skillRecoveryNotice");
+  if (recoveryNotice) recoveryNotice.hidden = !recoveryRequired;
   const groups = new Map();
   for (const skill of graph.skills || []) {
     const domain = text(skill.domain) || "其他";
@@ -205,6 +222,7 @@ function renderSkills(graph) {
       progress.title =
         "话题接触次数不代表答对次数或掌握程度；右侧学习状态可由家长确认。";
       const select = document.createElement("select");
+      select.disabled = recoveryRequired;
       select.setAttribute("aria-label", `${skill.name}学习状态`);
       for (const value of [
         "not_started",
@@ -214,20 +232,27 @@ function renderSkills(graph) {
       ]) {
         const option = document.createElement("option");
         option.value = value;
-        option.textContent = statusLabels[value];
+        option.textContent = skillStatusLabel(
+          value, Boolean(skill.parent_reviewed_at) || value !== skill.status,
+        );
         option.selected = value === skill.status;
         select.append(option);
       }
       select.addEventListener("change", async () => {
+        if (recoveryRequired) return;
         select.disabled = true;
         const previous = skill.status;
         try {
-          await api(`/api/skills/${encodeURIComponent(skill.id)}`, {
+          const updated = await api(`/api/skills/${encodeURIComponent(skill.id)}`, {
             method: "PATCH",
             body: JSON.stringify({ status: select.value }),
           });
-          skill.status = select.value;
-          row.dataset.state = select.value;
+          Object.assign(skill, updated);
+          select.value = skill.status;
+          row.dataset.state = skill.status;
+          for (const option of select.options) {
+            option.textContent = skillStatusLabel(option.value, true);
+          }
           progress.textContent = `话题接触 ${Number(skill.practice_count || 0)} 次 · 家长已评估`;
           byId("activeSkills").textContent = String(
             (graph.skills || []).filter((item) =>
@@ -514,10 +539,12 @@ function renderJournalPage() {
       ...(entry.learning_progress || [])
         .slice(0, 4)
         .map((value) => `话题接触 · ${value.name}：${value.turns || 0} 轮`),
-      ...(entry.skill_reviews || []).map(
-        (value) =>
-          `爸爸确认：${value.name} · ${statusLabels[value.status] || value.status}${value.evidence ? `（${value.evidence}）` : ""}`,
-      ),
+      ...(entry.practice_results || [])
+        .filter((value) => value.source === "local_number_activity"
+          && value.activity === "numbers"
+          && ["correct", "incorrect"].includes(value.last_result))
+        .map((value) => `数字练习记录：${value.question} · 答对 ${value.correct || 0} 次、再试 ${value.incorrect || 0} 次 · 最近一次${value.last_result === "correct" ? "答对" : "需要再试"}；单题结果不代表独立掌握。`),
+      ...(entry.skill_reviews || []).map(formatSkillReview),
       ...(entry.milestones || []).map((value) => `已确认的第一次：${value}`),
       ...(entry.milestone_candidates || []).map(
         (value) => `待爸爸确认：${value}`,

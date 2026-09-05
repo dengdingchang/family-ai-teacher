@@ -1702,7 +1702,7 @@ def _early_spoken_chunk(text: str) -> str:
 def _capture_parent_response(user_text: str, message_id: str) -> None:
     try:
         memory.capture_parent_message_response(user_text, message_id)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, TypeError, KeyError) as exc:
         logger.warning("Parent-message response capture skipped: %s", exc)
 
 
@@ -1761,6 +1761,7 @@ def _record_turn(
 ) -> dict[str, Any] | None:
     """Persist model-independent text state without taking voice chat down."""
 
+    response_message_id = ""
     try:
         response_message_id = memory.parent_message_response_target(user_text)
         if not response_message_id:
@@ -1769,21 +1770,29 @@ def _record_turn(
                 # "我想先画机身" is a bounded answer to the recent invitation,
                 # although the general receipt matcher treats "我想画" as a new topic.
                 response_message_id = memory.parent_message_response_target("好")
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        logger.warning("Parent response context is unavailable: %s", exc)
+    try:
         record = memory.save_session_turn(user_text, assistant_text)
+    except (OSError, ValueError, TypeError) as exc:
+        logger.warning("Conversation continued without memory persistence: %s", exc)
+        return None
+    try:
         memory.save_learning_event(
             "conversation",
             {"user_text": user_text, "assistant_text": assistant_text},
         )
         memory.observe_turn(user_text, assistant_text)
-    except (OSError, ValueError) as exc:
-        logger.warning("Conversation continued without memory persistence: %s", exc)
-        return None
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        # The spoken turn is already saved. Optional learning failures must not
+        # leave its receipt ready for another history append on a client retry.
+        logger.warning("Conversation saved without learning updates: %s", exc)
     if response_message_id:
         _capture_parent_response(user_text, response_message_id)
     if parent_message_id:
         try:
             memory.mark_parent_message_delivered(parent_message_id, assistant_text)
-        except (KeyError, OSError, ValueError) as exc:
+        except (KeyError, OSError, ValueError, TypeError) as exc:
             logger.warning("Spoken parent-message receipt could not be saved: %s", exc)
     if activity_transition:
         try:
@@ -1800,7 +1809,7 @@ def _record_turn(
             )
             if attempt:
                 memory.save_learning_event("practice_attempt", attempt)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, TypeError, KeyError) as exc:
             logger.warning("Activity progress could not be saved: %s", exc)
     return record
 

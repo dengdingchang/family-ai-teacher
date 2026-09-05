@@ -1353,11 +1353,35 @@ textForm.addEventListener("submit", async (event) => {
   await sendText(text);
 });
 
+async function startActivityConversation(button) {
+  const text = String(button.dataset.prompt || "").trim();
+  if (!text || !activityEnabled(String(button.dataset.activity || ""))
+      || conversationStarting || activeRequestController) return;
+  try {
+    if (!conversationActive) await startContinuousConversation();
+    // Permission can take long enough for a text reply or parent setting to
+    // change. Do not pause a live input segment for a request we cannot send.
+    if (!conversationActive || activeRequestController
+        || !activityEnabled(String(button.dataset.activity || ""))) return;
+    // The chosen activity replaces an unfinished listening segment. Keep the
+    // microphone open, then let normal streamed playback resume listening.
+    stopVadLoop();
+    segmentRecording = false;
+    segmentShouldSend = false;
+    segmentPcmChunks = [];
+    await sendStreamingRequest({
+      endpoint: "/api/conversation/text/stream",
+      body: JSON.stringify({ text }),
+      continuous: true,
+    });
+  } catch (_) {
+    setStatus("麦克风还没打开", "idle");
+    recordHint.textContent = "请家长帮忙打开麦克风，也可以在下面帮忙打字。";
+  }
+}
+
 for (const button of activityButtons) {
-  button.addEventListener("click", async () => {
-    if (conversationActive) stopContinuousConversation();
-    await sendText(String(button.dataset.prompt || ""));
-  });
+  button.addEventListener("click", () => void startActivityConversation(button));
 }
 
 const cameraVideo = document.querySelector("#cameraVideo");
