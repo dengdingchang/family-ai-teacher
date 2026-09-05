@@ -99,8 +99,29 @@ async function api(url, options = {}) {
   return payload;
 }
 
+function formatInteractionTime(seconds, available) {
+  if (
+    available !== true ||
+    typeof seconds !== "number" ||
+    !Number.isFinite(seconds) ||
+    seconds < 0
+  )
+    return "尚无计时";
+  if (seconds === 0) return "0秒";
+  if (seconds < 60) return "小于1分钟";
+  const wholeSeconds = Math.floor(seconds);
+  const minutes = Math.floor(wholeSeconds / 60);
+  if (minutes >= 60)
+    return `${Math.floor(minutes / 60)}小时${minutes % 60}分`;
+  return `${minutes}分${wholeSeconds % 60}秒`;
+}
+
 function renderToday(today) {
-  byId("todayTurns").textContent = String(today.conversation_turns || 0);
+  byId("todayInteractionTime").textContent = formatInteractionTime(
+    today.interaction_seconds,
+    today.interaction_timing_available,
+  );
+  byId("todayTurns").textContent = `${today.conversation_turns || 0}轮完整对话`;
   byId("todayTopics").textContent = today.topics?.length
     ? `今天：${today.topics.join("、")}`
     : "今天还没有主题";

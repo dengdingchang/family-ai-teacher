@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <title>家长成长空间 · Family AI Teacher</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/parent.css?v=20260906-room" />
+    <link rel="stylesheet" href="/parent.css?v=20260906-timing" />
   </head>
   <body>
     <a class="skip-link" href="#today">跳到今日成长</a>
@@ -45,8 +45,12 @@
       <section class="overview-grid" aria-label="今日概览">
         <article class="metric-card coral">
           <span>今天的交流</span>
-          <strong id="todayTurns">…</strong>
-          <small>轮真实互动</small>
+          <strong
+            id="todayInteractionTime"
+            aria-describedby="interactionTimingNote"
+            >…</strong
+          >
+          <small id="todayTurns">…轮完整对话</small>
         </article>
         <article class="metric-card blue">
           <span>正在探索的能力</span>
@@ -59,6 +63,9 @@
           <small>条由家庭长期保留</small>
         </article>
       </section>
+      <p id="interactionTimingNote" class="interaction-timing-note">
+        交流计时含短暂等待，不含隐藏页面和长时间闲置；从启用计时后累计。
+      </p>
 
       <section class="dashboard-grid">
         <div class="main-column">
@@ -388,6 +395,6 @@
         结构化成长信息保存在家庭电脑；导出中不包含原始录音、照片或视频。
       </p>
     </main>
-    <script src="/parent.js?v=20260906-room" defer></script>
+    <script src="/parent.js?v=20260906-timing" defer></script>
   </body>
 </html>

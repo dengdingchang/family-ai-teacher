@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .interaction import InteractionConflictError, InteractionReceiptIndex, normalize_interval, today_interaction, validate_arrival
+
 
 DEFAULT_ENABLED_ACTIVITIES = (
     "drawing",
@@ -113,6 +115,7 @@ class MemoryStore:
         self.parent_messages_path = data_dir / "parent_messages.json"
         self.activity_state_path = data_dir / "activity_state.json"
         self._lock = threading.RLock()
+        self._interaction_receipts = InteractionReceiptIndex(self.learning_events_path)
 
     @staticmethod
     def _clean_text(value: Any, limit: int = 240) -> str:
@@ -245,11 +248,15 @@ class MemoryStore:
             records = self._read_jsonl(self.history_path)
             return records if limit is None else records[-limit:] if limit > 0 else []
 
-    def get_recent_learning_events(self, limit: int | None = 6) -> list[dict[str, Any]]:
-        """Return only recent text events; media is never read from this store."""
+    def get_recent_learning_events(
+        self, limit: int | None = 6, *, exclude_types: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        """Filter before limiting; the default keeps all event types for export."""
 
         with self._lock:
             records = self._read_jsonl(self.learning_events_path)
+            if exclude_types:
+                records = [record for record in records if record.get("event_type") not in exclude_types]
             return records if limit is None else records[-limit:] if limit > 0 else []
 
     def _append_jsonl(self, path: Path, record: dict[str, Any]) -> None:
@@ -277,6 +284,38 @@ class MemoryStore:
                     "payload": payload,
                 },
             )
+
+    def record_interaction_interval(self, payload: dict[str, Any]) -> bool:
+        """Record elapsed frontend contact time independently of voice success."""
+        clean = normalize_interval(payload)
+        with self._lock:
+            previous = self._interaction_receipts.lookup(clean)
+            if previous is not None:
+                if previous != clean:
+                    raise InteractionConflictError("interaction receipt conflicts with an existing interval")
+                return False
+            now = datetime.now(timezone.utc)
+            validate_arrival(clean, now)
+            if self.learning_events_path.is_file() and self.learning_events_path.stat().st_size:
+                with self.learning_events_path.open("rb") as handle:
+                    handle.seek(-1, 2)
+                    missing_separator = handle.read(1) != b"\n"
+                if missing_separator:
+                    # Preserve a crash-truncated tail but do not concatenate
+                    # the next good receipt into that unreadable JSON line.
+                    with self.learning_events_path.open("ab") as handle:
+                        handle.write(b"\n")
+            self._append_jsonl(self.learning_events_path, {
+                "created_at": now.isoformat(), "event_type": "interaction_interval", "payload": clean,
+            })
+            self._interaction_receipts.remember(clean)
+            return True
+
+    def get_today_interaction(self) -> dict[str, Any]:
+        try:
+            return today_interaction(self.get_recent_learning_events(limit=None), datetime.now(timezone.utc))
+        except (OSError, ValueError, UnicodeError):
+            return {"interaction_seconds": 0.0, "interaction_timing_available": False}
 
     def get_memories(self, status: str = "", limit: int | None = 200) -> list[dict[str, Any]]:
         with self._lock:
@@ -735,6 +774,8 @@ class MemoryStore:
                     raise ValueError("family data path escaped the data directory")
                 existed = path.is_file()
                 path.unlink(missing_ok=True)
+                if scope == "learning_events":
+                    self._interaction_receipts.reset()
                 deleted[scope] = existed
         return {"deleted": deleted, "raw_media_deleted": False}
 
@@ -995,6 +1036,7 @@ class MemoryStore:
             "generated_at": _now(),
             "profile": self.get_child_profile(),
             "today": {
+                **self.get_today_interaction(),
                 "conversation_turns": len(today),
                 "topics": topics,
                 "questions": questions[-6:],

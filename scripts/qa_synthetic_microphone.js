@@ -1,4 +1,35 @@
 async (page) => {
+  // Block timing writes at the network boundary, including teardown keepalive.
+  const interactionRoute = /\/api\/conversation\/interaction-interval(?:\?.*)?$/;
+  const interactionIntervals = [];
+  async function interceptInteractionInterval(route) {
+    const request = route.request();
+    let body = {};
+    let validJson = true;
+    try {
+      body = request.postDataJSON() || {};
+    } catch (_) {
+      validJson = false;
+    }
+    const elapsed = (Date.parse(body.end_at) - Date.parse(body.start_at)) / 1000;
+    const record = {
+      method: request.method(),
+      resourceType: request.resourceType(),
+      validJson,
+      hasSessionId: typeof body.session_id === "string",
+      sequence: Number.isInteger(body.sequence) ? body.sequence : null,
+      durationSeconds: Number.isFinite(elapsed) ? elapsed : null,
+      fulfilled: false,
+    };
+    interactionIntervals.push(record);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, recorded: true, qa_intercepted: true }),
+    });
+    record.fulfilled = true;
+  }
+  await page.route(interactionRoute, interceptInteractionInterval);
   // Real software services with synthetic microphone media only. Never retain media payloads.
   let failure = "",
     result;
@@ -20,6 +51,7 @@ async (page) => {
         nonZeroThreshold: 1 / 32768,
         inputRmsSamples: [],
         inputLevels: {},
+        bargeGateSamples: [],
         avatarTransport: [],
         avatarDecode: [],
         environment: {
@@ -33,6 +65,8 @@ async (page) => {
       const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
       const originalSocketSend = WebSocket.prototype.send;
       const originalDecode = window.VideoDecoder?.prototype.decode;
+      const bargeGatePrototype = window.BargeInGate?.prototype;
+      const originalBargeGateUpdate = bargeGatePrototype?.update;
       const socketListeners = new Map();
       WebSocket.prototype.send = function (data) {
         if (new URL(this.url).pathname === "/ws/avatar") {
@@ -184,6 +218,8 @@ async (page) => {
         for (const [socket, listener] of socketListeners)
           socket.removeEventListener("message", listener);
         if (originalDecode) VideoDecoder.prototype.decode = originalDecode;
+        if (originalBargeGateUpdate)
+          bargeGatePrototype.update = originalBargeGateUpdate;
         for (const [prototype, original] of sourceMethods)
           prototype.createBufferSource = original;
         for (const [prototype, original] of analyserMethods)
@@ -192,6 +228,32 @@ async (page) => {
         window.__speakSyntheticInput = null;
         window.__restoreSyntheticVoiceQa = null;
       };
+      if (originalBargeGateUpdate)
+        bargeGatePrototype.update = function (level, now) {
+          // Observe the actual gate after its original decision; do not replay it.
+          const triggered = originalBargeGateUpdate.call(this, level, now);
+          qa.bargeGateConfig ||= {
+            threshold: this.threshold,
+            requiredVoicedMs: this.voicedMs,
+            sampleMs: this.sampleMs,
+            maxGapMs: this.maxGapMs,
+            windowMs: this.windowMs,
+          };
+          qa.bargeGateSamples.push({
+            at: now - qa.started,
+            level,
+            triggered,
+            turn: qa.turns.length - 1,
+            voicedMs: this.voiced.reduce(
+              (total, sample) => total + Math.min(
+                sample.duration,
+                sample.end - (now - this.windowMs),
+              ),
+              0,
+            ),
+          });
+          return triggered;
+        };
       navigator.mediaDevices.getUserMedia = async (constraints) => {
         qa.devices.push({
           audio: Boolean(constraints.audio),
@@ -821,6 +883,8 @@ async (page) => {
           turns: qa.turns,
           playback: qa.playback,
           bargeEvidence: qa.bargeEvidence,
+          bargeGateConfig: qa.bargeGateConfig || null,
+          bargeGateSamples: qa.bargeGateSamples,
           firstReturnedToListening: qa.firstReturnedToListening,
           thirdReturnedToListening: qa.thirdReturnedToListening,
           views: qa.views,
@@ -861,7 +925,15 @@ async (page) => {
         })
         .catch(() => {});
       await page.goto("about:blank");
+      await page.unroute(interactionRoute, interceptInteractionInterval);
     }
   }
-  return result;
+  return {
+    ...result,
+    interactionTimingQa: {
+      interceptedCount: interactionIntervals.length,
+      requests: interactionIntervals,
+      scope: "Simulated timing success through page teardown; family learning_events hash is checked externally.",
+    },
+  };
 }

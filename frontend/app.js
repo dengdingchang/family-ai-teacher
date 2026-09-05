@@ -1,5 +1,6 @@
 import "/pcm-player.js?v=20260906-stream1";
 import "/voice-activity.js?v=20260906-1";
+import "/interaction-clock.js?v=20260906-1";
 
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
@@ -640,6 +641,7 @@ async function playAudioPayload(payload, generation) {
   const blob = new Blob([bytes], { type: payload.audio_mime || "audio/wav" });
   activeAudioUrl = URL.createObjectURL(blob);
   const audio = new Audio(activeAudioUrl);
+  const timingSessionId = globalThis.familyInteractionClock?.sessionId;
   activeAudio = audio;
   const activeAudioUrlForPlayback = activeAudioUrl;
   const frameSerialAtCue = avatarFrameSerial;
@@ -695,7 +697,10 @@ async function playAudioPayload(payload, generation) {
   }
   const playbackPromise = new Promise((resolve, reject) => {
     let settled = false;
-    const onEnded = () => finish();
+    const onEnded = () => {
+      if (generation === queueGeneration) globalThis.familyInteractionClock?.playbackEnded(timingSessionId);
+      finish();
+    };
     const onError = () => finish(new Error("audio playback failed"));
     const finish = (error = null) => {
       if (settled) return;
@@ -796,6 +801,7 @@ function enqueueStreamingAudio(payload) {
       synchronized: false,
       avatarEnabled: avatarReady && avatarSocket?.readyState === WebSocket.OPEN,
       frameSerial: avatarFrameSerial,
+      timingSessionId: globalThis.familyInteractionClock?.sessionId,
       finishInput: null,
     };
     const beginSync = () => {
@@ -826,6 +832,10 @@ function enqueueStreamingAudio(payload) {
         if (session.duration >= 0.96) beginSync();
       },
       onEvent(detail) {
+        if (detail.type === "ended" && generation === queueGeneration
+            && Math.abs(detail.contextTime - detail.contextStartTime - detail.duration) < 2) {
+          globalThis.familyInteractionClock?.playbackEnded(session.timingSessionId);
+        }
         window.dispatchEvent(new CustomEvent("family-audio-playback", {
           detail: { ...detail, generation, transport: "web-audio" },
         }));
@@ -919,6 +929,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
   const turnId = createConversationTurnId();
   activeRequestController = controller;
   activeTurnId = turnId;
+  const timingSessionId = globalThis.familyInteractionClock?.begin();
   if (continuous) startBargeInMonitor();
   let assistantText = "";
   let streamError = null;
@@ -946,6 +957,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
         if (event.event === "vision_request") {
           observationRequest = event.text || "";
         } else if (event.event === "user_text") {
+          if (String(event.text || "").trim()) globalThis.familyInteractionClock?.confirmInput(timingSessionId);
           if (userTextBox) userTextBox.textContent = event.text || "刚刚说了一句话";
         } else if (event.event === "assistant_delta") {
           assistantText += event.text || "";
@@ -1043,6 +1055,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
     if (activeRequestController === controller) activeRequestController = null;
     if (interruptedRequestController === controller) interruptedRequestController = null;
     if (activeTurnId === turnId) activeTurnId = null;
+    if (!conversationActive) globalThis.familyInteractionClock?.end(timingSessionId);
     setBusy(false);
   }
 }
@@ -1288,6 +1301,7 @@ async function startContinuousConversation() {
     inputProcessor.connect(inputMuteGain);
     inputMuteGain.connect(audioContext.destination);
     conversationActive = true;
+    globalThis.familyInteractionClock?.begin();
     beginContinuousSegment();
   } catch (error) {
     conversationActive = false;
@@ -1303,6 +1317,7 @@ async function startContinuousConversation() {
 }
 
 function stopContinuousConversation() {
+  globalThis.familyInteractionClock?.end();
   conversationActive = false;
   segmentShouldSend = false;
   void cancelConversationTurn(activeTurnId);
@@ -1625,12 +1640,42 @@ recordVideoButton.addEventListener("click", async () => {
 
 setCameraActionState(false);
 
+function initializeInteractionClock() {
+  const clock = new globalThis.InteractionClock({
+    send: (payload) => globalThis.familyInteractionTimingSupported ? fetch("/api/conversation/interaction-interval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }) : Promise.resolve(),
+  });
+  globalThis.familyInteractionClock = clock;
+  clock.setVisible(!document.hidden);
+  let timer = null;
+  const stopTicker = () => {
+    if (timer !== null) window.clearInterval(timer);
+    timer = null;
+  };
+  const startTicker = () => {
+    if (timer === null && !document.hidden) timer = window.setInterval(() => clock.tick(), 1000);
+  };
+  document.addEventListener("visibilitychange", () => {
+    clock.setVisible(!document.hidden);
+    if (document.hidden) stopTicker();
+    else startTicker();
+  });
+  window.addEventListener("pagehide", () => { clock.end(); stopTicker(); });
+  window.addEventListener("pageshow", () => { clock.setVisible(!document.hidden); startTicker(); });
+  startTicker();
+}
+
 async function checkHealth() {
   const mayUpdateIdle = () => !conversationActive && !conversationStarting && !activeRequestController;
   try {
     const response = await fetch("/health");
     const payload = await response.json();
     if (!response.ok) throw new Error("本地服务不可用");
+    globalThis.familyInteractionTimingSupported = payload.interaction_timing_supported === true;
     setAvatarIdleAvailable(payload.avatar_idle_ready === true);
     const localReady = payload.stt_ready && payload.tts_ready;
     const configured = payload.llm_configured && localReady;
@@ -1668,6 +1713,7 @@ async function checkHealth() {
 }
 
 initializeAvatarIdle();
+initializeInteractionClock();
 checkHealth();
 void loadHistory();
 void loadChildProfileControls();

@@ -241,6 +241,19 @@ h3 {
   color: var(--muted);
   font-size: 11px;
 }
+.metric-card.coral {
+  grid-template-columns: minmax(0, 1fr);
+}
+.metric-card.coral strong {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.interaction-timing-note {
+  margin: -6px 0 24px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.85fr);
@@ -840,6 +853,9 @@ select:focus {
     display: block;
     font-size: 22px;
     margin: 7px 0 4px;
+  }
+  .metric-card.coral strong {
+    font-size: 16px;
   }
   .metric-card small {
     font-size: 10px;

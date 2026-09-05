@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from camera.adapter import BrowserCameraAdapter, CameraAdapterError
 from llm.client import LLMError, LLMNotConfiguredError, OpenAICompatibleClient
 from memory.store import DEFAULT_ENABLED_ACTIVITIES, MemoryStore
+from memory.interaction import InteractionConflictError
 from stt.adapter import FasterWhisperCPUAdapter, STTAdapterError
 from tts.adapter import NathanTTSAdapter, TTSAdapterError
 from tts.persistent import PersistentNathanTTSAdapter
@@ -165,6 +166,13 @@ class TextRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class InteractionIntervalRequest(BaseModel):
+    session_id: str = Field(min_length=32, max_length=36)
+    sequence: int = Field(strict=True, gt=0, le=9007199254740991)
+    start_at: str = Field(min_length=1, max_length=64)
+    end_at: str = Field(min_length=1, max_length=64)
+
+
 class ProfileUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=16)
     age: int | None = Field(default=None, ge=2, le=17)
@@ -281,7 +289,7 @@ def _messages_for(text: str, vision_context: str = "") -> list[dict[str, Any]]:
         recent = memory.get_recent_context()
         learning_events = [
             event
-            for event in memory.get_recent_learning_events(limit=12)
+            for event in memory.get_recent_learning_events(limit=12, exclude_types=("interaction_interval",))
             if str(event.get("event_type", "")) != "conversation"
         ][-4:]
         profile = memory.get_child_profile()
@@ -2328,6 +2336,7 @@ async def health() -> dict[str, Any]:
         "avatar_audio_lead_ms": settings.avatar_audio_lead_ms,
         "camera": "browser_preview_and_explicit_capture",
         "raw_audio_persisted": False,
+        "interaction_timing_supported": True,
         "raw_video_persisted": False,
         "automatic_frame_upload": False,
         "automatic_frame_upload_only_with_next_voice_turn": False,
@@ -2458,6 +2467,20 @@ async def complete_streaming_turn(turn_id: str) -> dict[str, Any]:
             }
         )
     return {"ok": True, "history": history_record, "already_completed": False}
+
+
+@app.post("/api/conversation/interaction-interval")
+async def record_interaction_interval(request: InteractionIntervalRequest) -> dict[str, Any]:
+    """Optional timing receipts never participate in voice or learning commits."""
+    try:
+        recorded = await asyncio.to_thread(memory.record_interaction_interval, request.model_dump())
+    except InteractionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="交流时间暂未保存，语音交流仍可继续") from exc
+    return {"ok": True, "recorded": recorded}
 
 
 @app.post("/api/conversation/turns/{turn_id}/cancel")

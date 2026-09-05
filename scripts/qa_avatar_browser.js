@@ -1,6 +1,39 @@
 async (page) => {
+  // Block timing writes at the network boundary, including teardown keepalive.
+  const interactionRoute = /\/api\/conversation\/interaction-interval(?:\?.*)?$/;
+  const interactionIntervals = [];
+  async function interceptInteractionInterval(route) {
+    const request = route.request();
+    let body = {};
+    let validJson = true;
+    try {
+      body = request.postDataJSON() || {};
+    } catch (_) {
+      validJson = false;
+    }
+    const elapsed = (Date.parse(body.end_at) - Date.parse(body.start_at)) / 1000;
+    const record = {
+      method: request.method(),
+      resourceType: request.resourceType(),
+      validJson,
+      hasSessionId: typeof body.session_id === "string",
+      sequence: Number.isInteger(body.sequence) ? body.sequence : null,
+      durationSeconds: Number.isFinite(elapsed) ? elapsed : null,
+      fulfilled: false,
+    };
+    interactionIntervals.push(record);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, recorded: true, qa_intercepted: true }),
+    });
+    record.fulfilled = true;
+  }
+  await page.route(interactionRoute, interceptInteractionInterval);
   // Measures the browser audio renderer, never the physical loudspeaker.
   // Generated speech samples live only in AnalyserNode memory and are discarded.
+  let result;
+  try {
   const historyBefore = await page.evaluate(
     async () => (await (await fetch("/api/memory/history")).json()).count,
   );
@@ -390,7 +423,7 @@ async (page) => {
       }
     });
   }
-  const result = await page.evaluate(
+  result = await page.evaluate(
     async ({ historyBefore, browserError }) => {
       const qa = window.__avatarQa;
       const historyAfter = (await (await fetch("/api/memory/history")).json())
@@ -553,8 +586,17 @@ async (page) => {
     path: "output/playwright/avatar-streaming.png",
     fullPage: true,
   });
-  if (browserError)
-    await page.reload(); // Destroy a timed-out turn before removing the receipt interception.
-  else await page.evaluate(() => window.__avatarQaRestore?.());
-  return result;
+  } finally {
+    // Destroy pending turns and flush timing while both QA guards still apply.
+    await page.goto("about:blank");
+    await page.unroute(interactionRoute, interceptInteractionInterval);
+  }
+  return {
+    ...result,
+    interactionTimingQa: {
+      interceptedCount: interactionIntervals.length,
+      requests: interactionIntervals,
+      scope: "Simulated timing success through page teardown; family learning_events hash is checked externally.",
+    },
+  };
 }
