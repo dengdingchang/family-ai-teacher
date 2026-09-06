@@ -81,7 +81,7 @@ test('an explicit reference to the captured photo reuses that image instead of s
   assert.equal(await observed.get('frame').text(), 'old-visible-picture');
 });
 
-test('streaming avatar has an explicit begin while legacy complete audio remains compatible', () => {
+test('streaming and complete audio use the compatible legacy avatar cues', () => {
   const events = [];
   const c = vm.createContext({ avatarReady: true, avatarSocket: { readyState: 1 }, WebSocket: { OPEN: 1 },
     avatarAudioLeadMs: 900, avatarAcceptFrames: false,
@@ -90,7 +90,7 @@ test('streaming avatar has an explicit begin while legacy complete audio remains
   vm.runInContext(extract('function cueAvatar(', 'function resolveQueueWaiters('), c);
   c.cueAvatar({ sequence: 1, audio_stream: true, avatar_pcm_base64: 'a' });
   c.cueAvatar({ sequence: 2, audio_stream: true, avatar_pcm_base64: 'b' });
-  assert.deepEqual(events, ['flush', 'audio_begin', 'audio', 'audio']);
+  assert.deepEqual(events, ['flush', 'audio', 'audio']);
   events.length = 0;
   c.cueAvatar({ sequence: 1, avatar_pcm_base64: 'whole-utterance' });
   assert.deepEqual(events, ['flush', 'audio']);

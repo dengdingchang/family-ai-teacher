@@ -48,7 +48,6 @@ let avatarDrawing = false;
 let avatarDecoder = null;
 let avatarEncodedQueue = [];
 let avatarPumpTimer = null;
-let avatarVideoClock = null;
 let avatarNeedsKeyframe = true;
 let avatarAcceptFrames = false;
 let avatarFrameGeneration = 0;
@@ -440,20 +439,11 @@ function ensureAvatarDecoder() {
 function pumpAvatarVideo() {
   avatarPumpTimer = null;
   if (!avatarEncodedQueue.length || !ensureAvatarDecoder()) return;
-  const next = avatarEncodedQueue[0];
+  const next = avatarEncodedQueue.shift();
   if (avatarNeedsKeyframe && !next.key) {
-    avatarEncodedQueue.shift();
     avatarPumpTimer = setTimeout(pumpAvatarVideo, 0);
     return;
   }
-  const now = performance.now();
-  if (!avatarVideoClock) avatarVideoClock = { startedAt: now, timestamp: next.timestamp };
-  const deadline = avatarVideoClock.startedAt + (next.timestamp - avatarVideoClock.timestamp) / 1000;
-  if (deadline > now) {
-    avatarPumpTimer = setTimeout(pumpAvatarVideo, deadline - now);
-    return;
-  }
-  avatarEncodedQueue.shift();
   try {
     avatarDecoder.decode(new EncodedVideoChunk({
       type: next.key ? "key" : "delta",
@@ -464,10 +454,7 @@ function pumpAvatarVideo() {
   } catch (_) {
     avatarNeedsKeyframe = true;
   }
-  // Keep decode work and timer jitter out of subsequent frame deadlines.
-  const followingTimestamp = avatarEncodedQueue[0]?.timestamp ?? next.timestamp + 40000;
-  const followingDeadline = avatarVideoClock.startedAt + (followingTimestamp - avatarVideoClock.timestamp) / 1000;
-  avatarPumpTimer = setTimeout(pumpAvatarVideo, Math.max(0, followingDeadline - performance.now()));
+  avatarPumpTimer = setTimeout(pumpAvatarVideo, 40);
 }
 
 function queueEncodedAvatarFrame(frame) {
@@ -562,7 +549,6 @@ function connectAvatar() {
     avatarNeedsKeyframe = true;
     if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
     avatarPumpTimer = null;
-    avatarVideoClock = null;
     if (avatarDecoder?.state === "configured") avatarDecoder.reset();
     cancelAvatarFrameWaiters();
     syncAvatarIdle();
@@ -589,7 +575,6 @@ function flushAvatar() {
   avatarNeedsKeyframe = true;
   if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
   avatarPumpTimer = null;
-  avatarVideoClock = null;
   if (avatarDecoder?.state === "configured") avatarDecoder.reset();
   avatarCanvas.hidden = true;
   syncAvatarIdle("idle");
@@ -612,7 +597,6 @@ function cueAvatar(payload) {
   const isFirstChunk = Number(payload.sequence || 1) === 1;
   if (isFirstChunk) flushAvatar();
   avatarAcceptFrames = true;
-  if (isFirstChunk && payload.audio_stream) sendAvatarEvent({ type: "audio_begin" });
   const sent = sendAvatarEvent({ type: "audio", pcm: payload.avatar_pcm_base64 });
   if (!sent) avatarAcceptFrames = false;
   return sent && isFirstChunk ? avatarAudioLeadMs : 0;
@@ -721,8 +705,10 @@ async function playAudioPayload(payload, generation) {
   }
   const frameSynchronized = await framePromise;
   const elapsedSyncMs = performance.now() - syncStartedAt;
-  if (shouldSynchronizeAvatar && !frameSynchronized) {
-    flushAvatar();
+  if (generation === queueGeneration && activeAudio === audio
+      && shouldSynchronizeAvatar && !frameSynchronized) {
+    // A slow first frame releases speech, not the current avatar turn.
+    // Keep accepting its late frames; explicit cancellation still flushes them.
     avatarCanvas.hidden = true;
     avatarImage.hidden = false;
     setAvatarState("声音先开始，动作稍后恢复");
@@ -862,8 +848,8 @@ function enqueueStreamingAudio(payload) {
       void waitForAvatarFrame(session.frameSerial, STREAM_AVATAR_FIRST_FRAME_WAIT_MS).then((ready) => {
         if (generation !== queueGeneration) { releaseStart(); return; }
         if (!ready) {
-          session.avatarEnabled = false;
-          flushAvatar();
+          // Let speech start on time while this turn's video catches up.
+          // Disabling or flushing here also discards every later PCM/frame.
           avatarCanvas.hidden = true;
           avatarImage.hidden = false;
           setAvatarState("声音先开始，动作稍后恢复");
@@ -887,13 +873,7 @@ function enqueueStreamingAudio(payload) {
         }));
       },
     });
-    let inputFinished = false;
-    session.finishInput = () => {
-      if (inputFinished) return;
-      inputFinished = true;
-      if (session.avatarEnabled && generation === queueGeneration) sendAvatarEvent({ type: "audio_end" });
-      beginSync();
-    };
+    session.finishInput = beginSync;
     streamingPlayback = session;
     if (!session.avatarEnabled) beginSync();
   }
