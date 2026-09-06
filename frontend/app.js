@@ -567,6 +567,8 @@ function flushAvatar() {
   avatarAcceptFrames = false;
   avatarEncodedQueue = [];
   avatarNeedsKeyframe = true;
+  if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
+  avatarPumpTimer = null;
   if (avatarDecoder?.state === "configured") avatarDecoder.reset();
   avatarCanvas.hidden = true;
   syncAvatarIdle("idle");

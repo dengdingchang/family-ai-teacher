@@ -58,3 +58,55 @@ test('an asynchronously decoded JPEG is released but never drawn after flush', a
   assert.equal(drawn, 0);
   assert.equal(closed, 1);
 });
+
+test('flush cancels the old pump so a new keyframe decodes immediately without replaying old frames', () => {
+  const timers = new Map();
+  let nextTimer = 1;
+  const decoded = [];
+  const drawn = [];
+  let resets = 0;
+  const context = vm.createContext({
+    avatarFrameGeneration: 1, avatarAcceptFrames: true,
+    avatarEncodedQueue: [], avatarNeedsKeyframe: true, avatarPumpTimer: null,
+    avatarCanvas: { getContext: () => ({ drawImage(frame) { drawn.push(frame.timestamp); } }) },
+    avatarImage: {}, syncAvatarIdle() {}, markAvatarFrame() {}, sendAvatarEvent() {},
+    ensureAvatarDecoder: () => true,
+    EncodedVideoChunk: class { constructor(options) { Object.assign(this, options); } },
+    setTimeout(callback) { const id = nextTimer++; timers.set(id, callback); return id; },
+    clearTimeout(id) { timers.delete(id); },
+  });
+  context.avatarDecoder = {
+    state: 'configured',
+    reset() { resets++; },
+    decode(chunk) {
+      decoded.push(chunk.timestamp);
+      context.showDecodedAvatarFrame({ timestamp: chunk.timestamp, close() {} });
+    },
+  };
+  vm.runInContext(extract('function showDecodedAvatarFrame(', 'function ensureAvatarDecoder('), context);
+  vm.runInContext(extract('function pumpAvatarVideo(', 'async function receiveAvatarBinary('), context);
+  vm.runInContext(extract('function flushAvatar(', 'function cueAvatar('), context);
+  const frame = (timestamp, key) => ({ timestamp, key, data: new Uint8Array([1]) });
+
+  context.queueEncodedAvatarFrame(frame(0, true));
+  const oldTimer = context.avatarPumpTimer;
+  context.queueEncodedAvatarFrame(frame(40000, false));
+  assert.equal(timers.has(oldTimer), true);
+  assert.equal(context.avatarEncodedQueue.length, 1);
+
+  context.flushAvatar();
+  context.avatarAcceptFrames = true;
+  context.queueEncodedAvatarFrame(frame(80000, true));
+  assert.deepEqual(decoded, [0, 80000], 'the new keyframe must decode before any timer fires');
+  assert.equal(timers.has(oldTimer), false);
+  assert.equal(resets, 1);
+
+  // Run the remaining scheduled pump: the discarded old delta must never return.
+  for (const [id, callback] of [...timers]) {
+    timers.delete(id);
+    callback();
+  }
+  assert.deepEqual(decoded, [0, 80000]);
+  assert.deepEqual(drawn, [0, 80000]);
+  assert.equal(context.avatarEncodedQueue.length, 0);
+});

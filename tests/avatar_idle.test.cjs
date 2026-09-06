@@ -19,7 +19,7 @@ function setup(available = true) {
     avatarCanvas: { hidden: true, getContext: () => ({ drawImage() {} }) },
     avatarImage: { hidden: false }, avatarStage: { dataset: { state: 'idle' } },
     avatarAcceptFrames: false, avatarFrameGeneration: 0, avatarEncodedQueue: [],
-    avatarNeedsKeyframe: false, avatarDecoder: null,
+    avatarNeedsKeyframe: false, avatarDecoder: null, avatarPumpTimer: null, clearTimeout,
     avatarReducedMotion: { matches: false, addEventListener(name, fn) { motionEvents[name] = fn; } },
     document: { hidden: false, addEventListener(name, fn) { documentEvents[name] = fn; } },
     window: { addEventListener() {} }, statusText: {}, dot: { classList: { toggle() {} } },
