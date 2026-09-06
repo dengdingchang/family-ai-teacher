@@ -20,14 +20,22 @@ This is a product interface. Restrained color carries function: forest green is 
 
 ## Child surface
 
-1. Always preserve equal-width teacher and child viewports, including narrow screens.
+1. Place the child/camera viewport on the left and Dad's avatar on the right, with equal widths including narrow screens. The explicitly opened drawing board temporarily uses the full viewport.
 2. Fit the voice action into the first desktop screen. Size portraits around available height; never make a giant photo push the primary action below the fold.
-3. Voice action first, three distinct illustrated activity choices second. The keyboard form lives in a native expandable adult helper.
+3. Group the primary voice action and the three activity choices inside the left child viewport area. Do not repeat them in a separate row below the main scene. Keep the voice action dominant; the keyboard form lives in a native expandable adult helper.
 4. Complete history remains available in a bounded scrollable log with keyboard access. Real-time text remains separate until playback is acknowledged.
 5. The child’s closed-camera state explicitly says voice alone works. Camera preview requires an explicit action. Frame upload is separately intentional.
 6. AI identity is stated in the header and footer. Preserve Nathan’s real image and tested avatar decoder. Speaking bars communicate state; they are not a fake lip animation.
 7. During listening, the existing bars follow the microphone RMS already sampled by voice activity detection. They show loudness, never recognition confidence or correctness. Silence rests at a stable low height; a new listening segment, released input, or another state clears the previous level. Use transform-only motion, keep the existing speaking animation, and hold listening bars still under reduced motion. Do not add microphone access, polling, storage, or repeated accessibility announcements for this feedback.
 8. A requested activity begins with its first instruction or story sentence. Keep the child's name in welcomes, comfort, parent messages, and specific progress celebrations; do not add a separate name-only audio clip before every activity. Teaching questions and playback acknowledgement remain intact.
+
+## Drawing surface
+
+Open a white canvas over the full viewport; use native fullscreen when available and the same overlay when unavailable. Default to pressed mouse dragging or touch drawing. Offer an explicit “移动就画” mouse mode, six colors, three widths, eraser, undo and reversible clear. Keep “返回”, “和爸爸说话” and “暂停观察” visible. Escape exits, keyboard focus stays inside the board and returns to the opening control on close.
+
+Opening the board authorizes observation of this canvas only. After changed strokes rest for at least 1.2 seconds, send at most one current RAM PNG every 5 seconds; unchanged or blank canvases do not cause repeated requests. Voice work takes priority. Pause, hide and close cancel observation; revision checks discard obsolete feedback. Do not store raw drawings or treat generated observation prompts as child speech, learning evidence or parent-message replies. Camera frames remain separately limited to explicit camera requests.
+
+Keep the voice controls usable while drawing and put concise feedback beside the canvas. A photo or text request during continuous conversation pauses the current input segment and resumes listening after playback; it must not silently consume the child's next answer.
 
 ## Parent surface
 

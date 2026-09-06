@@ -76,7 +76,7 @@ test('ending conversation after SSE done but before audio ends never sends a com
     AbortController, FormData, Blob, DOMException, URL,
     globalThis: {crypto:{randomUUID:()=>'cancel-after-done-0001'}},
     setBusy(){}, setStatus(){}, resetLiveTurn(){}, stopBargeInMonitor(){}, hideLiveTurn(){}, startBargeInMonitor(){},
-    flushAvatar(){}, cancelAvatarFrameWaiters(){}, releaseInputStream(){},
+    flushAvatar(){}, cancelAvatarFrameWaiters(){}, releaseInputStream(){}, stopVadLoop(){},
     recordButton: {classList:{remove(){}},setAttribute(){}}, recordLabel:{}, recordHint:{},
     answerBox:{classList:{add(){}},textContent:''}, liveTurn:{hidden:false}, appendHistoryRecord(){},
     fetch:async url=>{requests.push(url); return {ok:true,json:async()=>({ok:true})};},

@@ -214,7 +214,7 @@ function appContext() {
       new Promise((resolve) => waits.push({ serial, timeout, resolve })),
     cancelAvatarFrameWaiters: () =>
       waits.forEach((wait) => wait.resolve(false)),
-    flushAvatar() {},
+    flushAvatar() {}, sendAvatarEvent() { return true; },
     setAvatarState() {},
     drainResponseQueue() {},
     cancelPlayback() {},

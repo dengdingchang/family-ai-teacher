@@ -6,7 +6,8 @@
     <meta name="color-scheme" content="light" />
     <title>爸爸老师 · 家庭 AI 教室</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=20260906-listening-level1" />
+    <link rel="stylesheet" href="/styles.css?v=20260906-drawing-final2" />
+    <link rel="stylesheet" href="/drawing-board.css?v=20260906-2" />
   </head>
   <body>
     <a class="skip-link" href="#recordButton">开始交流</a>
@@ -58,31 +59,6 @@
           <span id="captureState" class="step-chip">画面按需发送</span>
         </div>
         <div class="video-pair" id="avatarStage" data-state="idle">
-          <article class="video-tile dad-video">
-            <div class="video-frame">
-              <img
-                id="avatarImage"
-                src="/api/avatar?v=neutral-20260904"
-                alt="Nathan 创建的 AI 爸爸老师"
-              />
-              <video id="avatarIdle" muted playsinline loop preload="auto" aria-label="正在陪伴的 AI 爸爸老师" hidden></video>
-              <canvas
-                id="avatarCanvas"
-                width="512"
-                height="512"
-                aria-label="会随声音自然说话的 AI 爸爸老师"
-                hidden
-              ></canvas
-              ><span class="frame-label">爸爸老师</span>
-              <div class="voice-bars" aria-hidden="true">
-                <i></i><i></i><i></i><i></i><i></i>
-              </div>
-            </div>
-            <div class="video-meta">
-              <strong>我陪你慢慢来</strong
-              ><span id="avatarStateText">爸爸老师正在准备</span>
-            </div>
-          </article>
           <article class="video-tile child-video" aria-label="孩子自己的画面">
             <div class="video-frame">
               <div class="video-placeholder">
@@ -193,6 +169,103 @@
                 </button>
               </div>
             </div>
+            <section class="conversation-controls" aria-label="和爸爸老师交流">
+              <div class="voice-control">
+                <button
+                  id="recordButton"
+                  class="record-button"
+                  type="button"
+                  aria-pressed="false"
+                  aria-describedby="recordHint"
+                >
+                  <span class="record-icon" aria-hidden="true"></span
+                  ><span id="recordLabel">和爸爸老师说话</span>
+                </button>
+                <p id="recordHint" class="record-hint" aria-live="polite">
+                  点一下，说说你今天想做什么
+                </p>
+              </div>
+              <div class="activity-row" aria-label="快速开始一个活动">
+                <button
+                  class="activity-chip"
+                  type="button"
+                  data-activity="drawing"
+                  aria-label="打开全屏画板，和爸爸一起画"
+                  data-prompt="爸爸老师，带我一起画画吧。"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="m5 15 11-11 4 4L9 19l-5 1 1-5Z"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      d="m13 7 4 4M5 15l4 4"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    /></svg
+                  ><span>画画</span>
+                </button>
+                <button
+                  class="activity-chip"
+                  type="button"
+                  data-activity="story"
+                  aria-label="开始故事，用声音一起讲"
+                  data-prompt="爸爸老师，讲一个故事，我们一起接着讲吧。"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M12 6C9 3 5 4 3 5v15c3-2 6-2 9 0 3-2 6-2 9 0V5c-2-1-6-2-9 1Zm0 0v14"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linejoin="round"
+                    /></svg
+                  ><span>故事</span>
+                </button>
+                <button
+                  class="activity-chip"
+                  type="button"
+                  data-activity="game"
+                  aria-label="开始小游戏，用声音一起玩"
+                  data-prompt="爸爸老师，和我玩一个简单的小游戏吧。"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linejoin="round"
+                    /></svg
+                  ><span>小游戏</span>
+                </button>
+              </div>
+            </section>
+          </article>
+          <article class="video-tile dad-video">
+            <div class="video-frame">
+              <img
+                id="avatarImage"
+                src="/api/avatar?v=neutral-20260904"
+                alt="Nathan 创建的 AI 爸爸老师"
+              />
+              <video id="avatarIdle" muted playsinline loop preload="auto" aria-label="正在陪伴的 AI 爸爸老师" hidden></video>
+              <canvas
+                id="avatarCanvas"
+                width="512"
+                height="512"
+                aria-label="会随声音自然说话的 AI 爸爸老师"
+                hidden
+              ></canvas
+              ><span class="frame-label">爸爸老师</span>
+              <div class="voice-bars" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </div>
+            <div class="video-meta">
+              <strong>我陪你慢慢来</strong
+              ><span id="avatarStateText">爸爸老师正在准备</span>
+            </div>
           </article>
         </div>
         <div class="stage-footer">
@@ -208,79 +281,6 @@
           aria-live="polite"
           hidden
         ></div>
-      </section>
-      <section class="conversation-controls" aria-label="和爸爸老师交流">
-        <div class="voice-control">
-          <button
-            id="recordButton"
-            class="record-button"
-            type="button"
-            aria-pressed="false"
-            aria-describedby="recordHint"
-          >
-            <span class="record-icon" aria-hidden="true"></span
-            ><span id="recordLabel">和爸爸老师说话</span>
-          </button>
-          <p id="recordHint" class="record-hint" aria-live="polite">
-            点一下，说说你今天想做什么
-          </p>
-        </div>
-        <div class="activity-row" aria-label="快速开始一个活动">
-          <span>也可以，边说边玩</span>
-          <button
-            class="activity-chip"
-            type="button"
-            data-activity="drawing"
-            aria-label="开始画画，用声音一起玩"
-            data-prompt="爸爸老师，带我一起画画吧。"
-          >
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="m5 15 11-11 4 4L9 19l-5 1 1-5Z"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linejoin="round"
-              />
-              <path
-                d="m13 7 4 4M5 15l4 4"
-                stroke="currentColor"
-                stroke-width="1.8"
-              /></svg
-            ><span>画画</span>
-          </button>
-          <button
-            class="activity-chip"
-            type="button"
-            data-activity="story"
-            aria-label="开始故事，用声音一起讲"
-            data-prompt="爸爸老师，讲一个让我也能接着说的故事吧。"
-          >
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M12 6C9 3 5 4 3 5v15c3-2 6-2 9 0 3-2 6-2 9 0V5c-2-1-6-2-9 1Zm0 0v14"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linejoin="round"
-              /></svg
-            ><span>故事</span>
-          </button>
-          <button
-            class="activity-chip"
-            type="button"
-            data-activity="game"
-            aria-label="开始小游戏，用声音一起玩"
-            data-prompt="爸爸老师，和我玩一个简单的小游戏吧。"
-          >
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linejoin="round"
-              /></svg
-            ><span>小游戏</span>
-          </button>
-        </div>
       </section>
       <section class="interaction-card" aria-label="完整对话记录">
         <div class="card-heading">
@@ -346,6 +346,6 @@
         </details>
       </footer>
     </main>
-    <script type="module" src="/app.js?v=20260906-avatar-turn-timer1"></script>
+    <script type="module" src="/app.js?v=20260906-drawing-final2"></script>
   </body>
 </html>

@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import os
 import importlib.util
+import base64
+import json
 import runpy
 import struct
 import subprocess
@@ -17,6 +19,9 @@ import time
 import urllib.request
 from fractions import Fraction
 from pathlib import Path
+
+
+_AUDIO_STREAM_END = object()
 
 
 def _gpu_free_mib() -> int:
@@ -66,6 +71,12 @@ class _H264BatchEncoder:
         codec.bit_rate = int(os.getenv("SOULX_H264_BITRATE", "192000"))
         codec.gop_size = 25
         codec.max_b_frames = 0
+        # Match the explicit conversion in push; do not leave browsers to guess
+        # the YUV matrix/range. The renderer's RGB values use the sRGB transfer.
+        codec.color_range = 1  # MPEG limited range
+        codec.colorspace = 1  # BT.709 matrix
+        codec.color_primaries = 1  # BT.709 / sRGB primaries
+        codec.color_trc = 13  # IEC 61966-2-1 (sRGB)
         codec.options = {
             "preset": "ultrafast",
             "tune": "zerolatency",
@@ -78,6 +89,11 @@ class _H264BatchEncoder:
     def push(self, frame_array) -> bytes:
         with self._lock:
             frame = self._av.VideoFrame.from_ndarray(frame_array, format="rgb24")
+            frame = frame.reformat(
+                format="yuv420p", dst_colorspace="ITU709",
+                src_color_range="JPEG", dst_color_range="MPEG",
+                dst_color_trc=13, dst_color_primaries=1,
+            )
             frame.pts = self._frame_index
             frame.time_base = Fraction(1, 25)
             self._frame_index += 1
@@ -138,10 +154,15 @@ def _run_soulx_server(server_path: Path) -> None:
         import numpy as np
 
         while len(pending) < self.chunk_samples:
+            if self._stop.is_set():
+                return pending, None
             if self._flushed.is_set():
                 return np.zeros(0, dtype=np.float32), None
             try:
-                audio = self.audio_q.get(timeout=0.2)
+                if self._family_stream_ended and self.audio_q.empty():
+                    audio = _AUDIO_STREAM_END
+                else:
+                    audio = self.audio_q.get(timeout=0.2)
                 if audio is None:
                     return pending, None
                 if self._flushed.is_set():
@@ -150,16 +171,48 @@ def _run_soulx_server(server_path: Path) -> None:
                     # but the first 0.96 s can be discarded on the next pass.
                     self.audio_q.put_nowait(audio)
                     return np.zeros(0, dtype=np.float32), None
+                if audio is _AUDIO_STREAM_END:
+                    if not self._family_streaming:
+                        continue
+                    self._family_streaming = False
+                    self._family_stream_ended = False
+                    if not len(pending):
+                        return pending, None
+                    pending = np.concatenate(
+                        [pending, np.zeros(self.chunk_samples - len(pending), dtype=np.float32)]
+                    )
+                    continue
                 pending = np.concatenate([pending, audio])
             except queue.Empty:
                 if self._stop.is_set():
                     return pending, None
+                # A normal streaming TTS gap can exceed 200 ms. Padding here
+                # would add silence only to the mouth's timeline, not speech.
+                if self._family_streaming:
+                    continue
                 if not len(pending):
                     continue
                 pending = np.concatenate(
                     [pending, np.zeros(self.chunk_samples - len(pending), dtype=np.float32)]
                 )
         return pending[self.chunk_samples :], pending[: self.chunk_samples]
+
+    def begin_audio_stream(self):
+        self._family_streaming = True
+        self._family_stream_ended = False
+
+    def end_audio_stream(self):
+        import queue
+
+        if not self._family_streaming or self._family_stream_ended:
+            return
+        self._family_stream_ended = True
+        try:
+            self.audio_q.put_nowait(_AUDIO_STREAM_END)
+        except queue.Full:
+            # Preserve all queued PCM. The consumer also checks the end flag
+            # once that queue has drained, so a full queue cannot lose the end.
+            pass
 
     def paced_accumulate_loop(self):
         """Accept full utterances but release render chunks on the playback clock."""
@@ -205,6 +258,8 @@ def _run_soulx_server(server_path: Path) -> None:
 
     def render_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
+        self._family_streaming = False
+        self._family_stream_ended = False
         self._family_h264_encoder = _H264BatchEncoder()
         self._family_warm_ready = threading.Event()
         if os.getenv("SOULX_IDLE_MODE", "speech_only").strip().lower() == "speech_only":
@@ -221,8 +276,41 @@ def _run_soulx_server(server_path: Path) -> None:
         return payload
 
     def interruptible_flush(self):
+        self._family_streaming = False
+        self._family_stream_ended = False
         original_flush(self)
         self._family_h264_encoder.reset()
+
+    async def streaming_handler(self, ws):
+        """Preserve the upstream protocol and add explicit streamed-audio bounds."""
+        self.clients.add(ws)
+        try:
+            await ws.send(json.dumps({
+                "type": "ready", "fps": self.engine.fps,
+                "chunk_seconds": self.engine.chunk_seconds,
+                "audio_stream_protocol": True,
+            }))
+            async for message in ws:
+                if not isinstance(message, str):
+                    continue
+                try:
+                    event = json.loads(message)
+                except json.JSONDecodeError:
+                    continue
+                kind = event.get("type")
+                if kind == "audio_begin":
+                    self.engine.begin_audio_stream()
+                elif kind == "audio_end":
+                    self.engine.end_audio_stream()
+                elif kind == "audio":
+                    self.engine.feed(base64.b64decode(event["pcm"]))
+                elif kind == "flush":
+                    self.engine.flush()
+                    await ws.send(json.dumps({"type": "flushed"}))
+                elif kind == "ping":
+                    await ws.send(json.dumps({"type": "pong"}))
+        finally:
+            self.clients.discard(ws)
 
     def interruptible_emit_loop(self):
         """Stop the currently emitting frame group as soon as a turn is interrupted."""
@@ -267,10 +355,13 @@ def _run_soulx_server(server_path: Path) -> None:
 
     module.RenderEngine.__init__ = render_init
     module.RenderEngine.flush = interruptible_flush
+    module.RenderEngine.begin_audio_stream = begin_audio_stream
+    module.RenderEngine.end_audio_stream = end_audio_stream
     module.RenderEngine._emit_loop = interruptible_emit_loop
     module.RenderEngine._to_jpeg = encode_frame
     module.AvatarServer.emit_frames_threadsafe = emit_nonempty
     module.AvatarServer.serve = warm_gated_serve
+    module.AvatarServer.handler = streaming_handler
     if os.getenv("SOULX_IDLE_MODE", "speech_only").strip().lower() == "speech_only":
         module.RenderEngine._next_chunk = speech_only_next_chunk
         module.RenderEngine._accumulate_loop = paced_accumulate_loop

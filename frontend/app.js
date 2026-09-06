@@ -1,6 +1,7 @@
 import "/pcm-player.js?v=20260906-stream1";
 import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
+import "/drawing-board.js?v=20260906-2";
 
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
@@ -47,6 +48,7 @@ let avatarDrawing = false;
 let avatarDecoder = null;
 let avatarEncodedQueue = [];
 let avatarPumpTimer = null;
+let avatarVideoClock = null;
 let avatarNeedsKeyframe = true;
 let avatarAcceptFrames = false;
 let avatarFrameGeneration = 0;
@@ -73,6 +75,8 @@ let lastVoiceAt = 0;
 let loudSince = 0;
 let segmentShouldSend = false;
 let activeRequestController = null;
+let activeRequestSource = "";
+let drawingBoard = null;
 let interruptedRequestController = null;
 let activeTurnId = null;
 let bargeInTimer = null;
@@ -212,6 +216,9 @@ function setStatus(message, state = "idle") {
   if (visualState !== "listening") resetListeningLevel();
   dot.classList.toggle("live", visualState !== "offline");
   syncAvatarIdle(visualState);
+  if (typeof drawingBoard !== "undefined" && drawingBoard?.isOpen) {
+    drawingBoard.setVoiceState(["listening", "thinking", "speaking"].includes(visualState) ? visualState : "paused");
+  }
 }
 
 function resetListeningLevel() {
@@ -433,11 +440,20 @@ function ensureAvatarDecoder() {
 function pumpAvatarVideo() {
   avatarPumpTimer = null;
   if (!avatarEncodedQueue.length || !ensureAvatarDecoder()) return;
-  const next = avatarEncodedQueue.shift();
+  const next = avatarEncodedQueue[0];
   if (avatarNeedsKeyframe && !next.key) {
+    avatarEncodedQueue.shift();
     avatarPumpTimer = setTimeout(pumpAvatarVideo, 0);
     return;
   }
+  const now = performance.now();
+  if (!avatarVideoClock) avatarVideoClock = { startedAt: now, timestamp: next.timestamp };
+  const deadline = avatarVideoClock.startedAt + (next.timestamp - avatarVideoClock.timestamp) / 1000;
+  if (deadline > now) {
+    avatarPumpTimer = setTimeout(pumpAvatarVideo, deadline - now);
+    return;
+  }
+  avatarEncodedQueue.shift();
   try {
     avatarDecoder.decode(new EncodedVideoChunk({
       type: next.key ? "key" : "delta",
@@ -448,7 +464,10 @@ function pumpAvatarVideo() {
   } catch (_) {
     avatarNeedsKeyframe = true;
   }
-  avatarPumpTimer = setTimeout(pumpAvatarVideo, 40);
+  // Keep decode work and timer jitter out of subsequent frame deadlines.
+  const followingTimestamp = avatarEncodedQueue[0]?.timestamp ?? next.timestamp + 40000;
+  const followingDeadline = avatarVideoClock.startedAt + (followingTimestamp - avatarVideoClock.timestamp) / 1000;
+  avatarPumpTimer = setTimeout(pumpAvatarVideo, Math.max(0, followingDeadline - performance.now()));
 }
 
 function queueEncodedAvatarFrame(frame) {
@@ -543,6 +562,7 @@ function connectAvatar() {
     avatarNeedsKeyframe = true;
     if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
     avatarPumpTimer = null;
+    avatarVideoClock = null;
     if (avatarDecoder?.state === "configured") avatarDecoder.reset();
     cancelAvatarFrameWaiters();
     syncAvatarIdle();
@@ -569,6 +589,7 @@ function flushAvatar() {
   avatarNeedsKeyframe = true;
   if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
   avatarPumpTimer = null;
+  avatarVideoClock = null;
   if (avatarDecoder?.state === "configured") avatarDecoder.reset();
   avatarCanvas.hidden = true;
   syncAvatarIdle("idle");
@@ -591,6 +612,7 @@ function cueAvatar(payload) {
   const isFirstChunk = Number(payload.sequence || 1) === 1;
   if (isFirstChunk) flushAvatar();
   avatarAcceptFrames = true;
+  if (isFirstChunk && payload.audio_stream) sendAvatarEvent({ type: "audio_begin" });
   const sent = sendAvatarEvent({ type: "audio", pcm: payload.avatar_pcm_base64 });
   if (!sent) avatarAcceptFrames = false;
   return sent && isFirstChunk ? avatarAudioLeadMs : 0;
@@ -664,6 +686,7 @@ async function playAudioPayload(payload, generation) {
   activeAudioUrl = URL.createObjectURL(blob);
   const audio = new Audio(activeAudioUrl);
   const timingSessionId = globalThis.familyInteractionClock?.sessionId;
+  const trackInteraction = typeof activeRequestSource === "undefined" || activeRequestSource !== "drawing-observation";
   activeAudio = audio;
   const activeAudioUrlForPlayback = activeAudioUrl;
   const frameSerialAtCue = avatarFrameSerial;
@@ -720,7 +743,7 @@ async function playAudioPayload(payload, generation) {
   const playbackPromise = new Promise((resolve, reject) => {
     let settled = false;
     const onEnded = () => {
-      if (generation === queueGeneration) globalThis.familyInteractionClock?.playbackEnded(timingSessionId);
+      if (trackInteraction && generation === queueGeneration) globalThis.familyInteractionClock?.playbackEnded(timingSessionId);
       finish();
     };
     const onError = () => finish(new Error("audio playback failed"));
@@ -824,6 +847,7 @@ function enqueueStreamingAudio(payload) {
       avatarEnabled: avatarReady && avatarSocket?.readyState === WebSocket.OPEN,
       frameSerial: avatarFrameSerial,
       timingSessionId: globalThis.familyInteractionClock?.sessionId,
+      trackInteraction: typeof activeRequestSource === "undefined" || activeRequestSource !== "drawing-observation",
       finishInput: null,
     };
     const beginSync = () => {
@@ -854,7 +878,7 @@ function enqueueStreamingAudio(payload) {
         if (session.duration >= 0.96) beginSync();
       },
       onEvent(detail) {
-        if (detail.type === "ended" && generation === queueGeneration
+        if (session.trackInteraction && detail.type === "ended" && generation === queueGeneration
             && Math.abs(detail.contextTime - detail.contextStartTime - detail.duration) < 2) {
           globalThis.familyInteractionClock?.playbackEnded(session.timingSessionId);
         }
@@ -863,7 +887,13 @@ function enqueueStreamingAudio(payload) {
         }));
       },
     });
-    session.finishInput = beginSync;
+    let inputFinished = false;
+    session.finishInput = () => {
+      if (inputFinished) return;
+      inputFinished = true;
+      if (session.avatarEnabled && generation === queueGeneration) sendAvatarEvent({ type: "audio_end" });
+      beginSync();
+    };
     streamingPlayback = session;
     if (!session.avatarEnabled) beginSync();
   }
@@ -939,8 +969,16 @@ async function completeConversationTurn(turnId) {
   return payload;
 }
 
-async function sendStreamingRequest({ endpoint, body, continuous = false }) {
+async function sendStreamingRequest({ endpoint, body, continuous = false, signal = null, source = "", onText = null }) {
   if (activeRequestController) return { ok: false, busy: true };
+  if (signal?.aborted) return { ok: false, aborted: true };
+  continuous = continuous || conversationActive;
+  if (continuous) {
+    stopVadLoop();
+    segmentRecording = false;
+    segmentShouldSend = false;
+    segmentPcmChunks = [];
+  }
   setBusy(true);
   setStatus("正在听清楚你说的话…", "thinking");
   resetLiveTurn();
@@ -950,8 +988,19 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
   const controller = new AbortController();
   const turnId = createConversationTurnId();
   activeRequestController = controller;
+  activeRequestSource = source;
   activeTurnId = turnId;
-  const timingSessionId = globalThis.familyInteractionClock?.begin();
+  const cancelFromCaller = () => {
+    controller.abort();
+    if (activeRequestController === controller) {
+      clearResponseQueue();
+      cancelPlayback();
+      void cancelConversationTurn(turnId);
+    }
+  };
+  signal?.addEventListener("abort", cancelFromCaller, { once: true });
+  const timingSessionId = source === "drawing-observation"
+    ? globalThis.familyInteractionClock?.sessionId : globalThis.familyInteractionClock?.begin();
   if (continuous) startBargeInMonitor();
   let assistantText = "";
   let streamError = null;
@@ -979,12 +1028,13 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
         if (event.event === "vision_request") {
           observationRequest = event.text || "";
         } else if (event.event === "user_text") {
-          if (String(event.text || "").trim()) globalThis.familyInteractionClock?.confirmInput(timingSessionId);
+          if (source !== "drawing-observation" && String(event.text || "").trim()) globalThis.familyInteractionClock?.confirmInput(timingSessionId);
           if (userTextBox) userTextBox.textContent = event.text || "刚刚说了一句话";
         } else if (event.event === "assistant_delta") {
           assistantText += event.text || "";
           answerBox.classList.add("has-answer");
           answerBox.textContent = assistantText;
+          onText?.(assistantText);
           setStatus("爸爸老师正在想一想…", "thinking");
         } else if (event.event === "audio") {
           setStatus(
@@ -1005,6 +1055,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
           if (assistantText) {
             answerBox.classList.add("has-answer");
             answerBox.textContent = assistantText;
+            onText?.(assistantText);
           }
           if (event.history && assistantText) {
             appendHistoryRecord(event.history);
@@ -1020,12 +1071,18 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
       const observed = new FormData();
       observed.append("transcript", observationRequest);
       observed.append("observation_attempted", "true");
-      if (!controller.signal.aborted && activityEnabled("vision_photo")) {
+      const drawingOpen = typeof drawingBoard !== "undefined" && drawingBoard?.isOpen;
+      if (!controller.signal.aborted && (drawingOpen ? activityEnabled("drawing") : activityEnabled("vision_photo"))) {
         setStatus("你请爸爸看，现在拍一张…", "thinking");
         captureState.textContent = "按你刚才的请求，拍一张";
         try {
-          const frame = await makeFrameBlob();
-          if (!controller.signal.aborted) observed.append("frame", frame, "requested-frame.jpg");
+          const usePhoto = !drawingOpen && typeof capturedBlob !== "undefined" && capturedBlob
+            && /(?:刚才|剛才|这张|這張|那张|那張|上面|照片|图片|圖片)/.test(observationRequest);
+          const frame = drawingOpen ? await drawingBoard.getSnapshot() : usePhoto ? capturedBlob : await makeFrameBlob();
+          if (!controller.signal.aborted && frame) {
+            observed.append("frame", frame, drawingOpen ? "drawing.png" : "requested-frame.jpg");
+            if (drawingOpen) observed.append("visual_source", "drawing");
+          }
         } catch (_) {
           cameraStatus.textContent = "这次没打开画面，我们继续说话";
         }
@@ -1053,6 +1110,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
       if (completion.history) appendHistoryRecord(completion.history);
       turnCommitted = true;
     }
+    if (source === "drawing-observation") await cancelConversationTurn(turnId);
     hideLiveTurn();
     stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
@@ -1074,7 +1132,11 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
     if (continuous && conversationActive) beginContinuousSegment();
     return { ok: false, error: message };
   } finally {
-    if (activeRequestController === controller) activeRequestController = null;
+    signal?.removeEventListener("abort", cancelFromCaller);
+    if (activeRequestController === controller) {
+      activeRequestController = null;
+      activeRequestSource = "";
+    }
     if (interruptedRequestController === controller) interruptedRequestController = null;
     if (activeTurnId === turnId) activeTurnId = null;
     if (!conversationActive) globalThis.familyInteractionClock?.end(timingSessionId);
@@ -1085,6 +1147,18 @@ async function sendStreamingRequest({ endpoint, body, continuous = false }) {
 async function sendText(text) {
   const clean = text.trim();
   if (!clean) return;
+  if (drawingBoard?.isOpen && activityEnabled("drawing")) {
+    const body = new FormData();
+    body.append("transcript", clean);
+    body.append("observation_attempted", "true");
+    const snapshot = await drawingBoard.getSnapshot();
+    if (snapshot) {
+      body.append("frame", snapshot, "drawing.png");
+      body.append("visual_source", "drawing");
+    }
+    return sendStreamingRequest({ endpoint: "/api/conversation/stream", body, source: "drawing-voice",
+      onText: (text) => drawingBoard?.setFeedback(text) });
+  }
   await sendStreamingRequest({
     endpoint: "/api/conversation/text/stream",
     body: JSON.stringify({ text: clean }),
@@ -1096,7 +1170,16 @@ async function sendAudio(blob, continuous = false) {
   const form = new FormData();
   const extension = blob.type === "audio/wav" ? "wav" : "webm";
   form.append("audio", blob, `child-speech.${extension}`);
-  await sendStreamingRequest({ endpoint: "/api/conversation/stream", body: form, continuous });
+  const drawingOpen = drawingBoard?.isOpen && activityEnabled("drawing");
+  if (drawingOpen) {
+    const snapshot = await drawingBoard.getSnapshot();
+    if (snapshot) {
+      form.append("frame", snapshot, "drawing.png");
+      form.append("visual_source", "drawing");
+    }
+  }
+  await sendStreamingRequest({ endpoint: "/api/conversation/stream", body: form, continuous,
+    source: drawingOpen ? "drawing-voice" : "", onText: drawingOpen ? (text) => drawingBoard?.setFeedback(text) : null });
 }
 
 function stopVadLoop() {
@@ -1404,8 +1487,85 @@ async function startActivityConversation(button) {
   }
 }
 
+async function interruptActiveReply() {
+  const previous = activeRequestController;
+  if (!previous) return;
+  interruptedRequestController = previous;
+  void cancelConversationTurn(activeTurnId);
+  previous.abort();
+  stopVadLoop();
+  stopBargeInMonitor();
+  segmentRecording = false;
+  segmentShouldSend = false;
+  segmentPcmChunks = [];
+  clearResponseQueue();
+  cancelPlayback();
+  const until = performance.now() + 1500;
+  while (activeRequestController === previous && performance.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (activeRequestController === previous) throw new Error("上一句话正在结束，请稍后再试一次");
+}
+
+function getDrawingBoard() {
+  if (drawingBoard) return drawingBoard;
+  drawingBoard = globalThis.createDrawingBoard({
+    async onObserve(blob, revision, meta) {
+      if (!meta.isCurrent() || !activityEnabled("drawing")) return null;
+      if (activeRequestController || conversationStarting || speechStartedAt || loudSince) return { deferred: true };
+      const body = new FormData();
+      body.append("transcript", "请看看这张正在画的画，简短说出一个可见的笔画或给一个画画建议。");
+      body.append("frame", blob, "drawing.png");
+      body.append("visual_source", "drawing");
+      body.append("observation_attempted", "true");
+      body.append("drawing_observation", "true");
+      const result = await sendStreamingRequest({ endpoint: "/api/conversation/stream", body,
+        continuous: conversationActive, signal: meta.signal, source: "drawing-observation",
+        onText: (text) => drawingBoard?.setFeedback(text, revision, meta.sessionId) });
+      if (result.busy) return { deferred: true };
+      if (!result.ok && !result.aborted && !result.interrupted) throw new Error(result.error || "这次看画暂时没有回应");
+      return result.ok ? { text: result.assistantText } : null;
+    },
+    async onTalk() {
+      if (conversationActive) stopContinuousConversation();
+      else {
+        try { await startContinuousConversation(); }
+        catch (_) { drawingBoard?.setFeedback("画板可以继续用，请家长帮忙打开麦克风再和爸爸老师说话。"); }
+      }
+    },
+    onClose() {
+      if (activeRequestController && activeRequestSource.startsWith("drawing")) {
+        activeRequestController.abort();
+        clearResponseQueue();
+        cancelPlayback();
+      }
+    },
+  });
+  return drawingBoard;
+}
+
+async function openDrawingActivity(button) {
+  if (!activityEnabled("drawing") || conversationStarting) return;
+  const board = getDrawingBoard();
+  board.open();
+  void prepareStreamingAudio();
+  try {
+    await interruptActiveReply();
+    if (!board.isOpen) return;
+    if (!conversationActive) await startContinuousConversation();
+    if (!board.isOpen || !activityEnabled("drawing")) return;
+    await sendStreamingRequest({ endpoint: "/api/conversation/text/stream",
+      body: JSON.stringify({ text: String(button.dataset.prompt || "爸爸老师，带我一起画画吧。") }),
+      continuous: true, source: "drawing-activity", onText: (text) => board.setFeedback(text) });
+  } catch (_) {
+    board.setFeedback("画板已经准备好了。你可以先画，点“和爸爸说话”再一起聊。");
+    board.setVoiceState("paused");
+  }
+}
+
 for (const button of activityButtons) {
-  button.addEventListener("click", () => void startActivityConversation(button));
+  button.addEventListener("click", () => void (button.dataset.activity === "drawing"
+    ? openDrawingActivity(button) : startActivityConversation(button)));
 }
 
 const cameraVideo = document.querySelector("#cameraVideo");
@@ -1451,6 +1611,7 @@ async function loadChildProfileControls() {
   for (const button of activityButtons) {
     button.hidden = !activityEnabled(String(button.dataset.activity || ""));
   }
+  if (drawingBoard?.isOpen && !activityEnabled("drawing")) drawingBoard.close();
   const activityRow = document.querySelector(".activity-row");
   if (activityRow) activityRow.hidden = activityButtons.every((button) => button.hidden);
   captureButton.hidden = !activityEnabled("vision_photo");
@@ -1592,12 +1753,17 @@ window.observe_child = () => visionRequest("/api/vision/observe-child", "爸爸�
 
 captureButton.addEventListener("click", async () => {
   try {
+    await prepareStreamingAudio();
+    await interruptActiveReply();
     await capture_frame();
-    await sendStreamingRequest({
+    const result = await sendStreamingRequest({
       endpoint: "/api/conversation/frame/stream",
       body: capturedBlob,
+      continuous: conversationActive,
     });
-    captureState.textContent = "爸爸看到了照片";
+    captureState.textContent = result.ok ? "爸爸看到了照片" : "照片还在，可以再给爸爸看";
+    if (result.busy) cameraStatus.textContent = "爸爸老师正在结束上一句话，请再点一下照片";
+    else if (result.error) cameraStatus.textContent = result.error;
   } catch (error) {
     cameraStatus.textContent = error.message;
     visionResult.hidden = false;

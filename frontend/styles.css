@@ -424,30 +424,31 @@ h2 {
   }
 }
 .conversation-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 28px;
-  padding: 22px 3px 23px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 224px;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 0 14px;
 }
 .voice-control {
-  flex: 1;
-  max-width: 550px;
+  min-width: 0;
 }
 .record-button {
   width: 100%;
-  min-height: 68px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 15px;
+  gap: 10px;
   border: 0;
-  border-radius: 18px;
+  border-radius: 14px;
+  padding: 10px 12px;
   color: var(--paper);
   background: var(--accent);
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 650;
-  box-shadow: 0 4px 0 oklch(0.29 0.055 163);
+  box-shadow: 0 3px 0 oklch(0.29 0.055 163);
 }
 .record-button:hover:not(:disabled) {
   background: var(--accent-strong);
@@ -496,41 +497,38 @@ h2 {
   display: none;
 }
 .record-hint {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 12px;
   text-align: center;
   line-height: 1.5;
 }
 .activity-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  gap: 12px;
-}
-.activity-row > span {
-  font-size: 12px;
-  color: var(--muted);
-  margin-right: 3px;
+  min-width: 0;
+  gap: 8px;
 }
 .activity-chip {
-  min-width: 85px;
-  min-height: 74px;
+  min-width: 0;
+  min-height: 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--line);
-  border-radius: 15px;
-  padding: 10px 14px;
+  border-radius: 12px;
+  padding: 7px 9px;
   color: var(--ink);
   background: transparent;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 .activity-chip svg {
-  width: 25px;
-  height: 25px;
+  width: 22px;
+  height: 22px;
   color: oklch(0.49 0.083 56);
 }
 .activity-chip:nth-of-type(2) svg {
@@ -727,14 +725,9 @@ h2 {
   .brand-byline {
     display: none;
   }
-  .activity-row {
-    gap: 8px;
-  }
-  .activity-row > span {
-    display: none;
-  }
-  .activity-chip {
-    min-width: 76px;
+  .conversation-controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
   }
   .video-meta {
     align-items: flex-start;
@@ -889,36 +882,25 @@ h2 {
     padding-block: 8px;
   }
   .conversation-controls {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    justify-content: stretch;
-    gap: 17px;
-    padding: 20px 0;
-  }
-  .voice-control {
-    max-width: none;
+    padding: 4px 0 10px;
   }
   .record-button {
-    min-height: 66px;
-    font-size: 19px;
-    border-radius: 16px;
+    min-height: 56px;
+    font-size: 16px;
+    gap: 8px;
+    padding-inline: 8px;
   }
   .record-hint {
     font-size: 11px;
-    margin-top: 11px;
+    margin-top: 7px;
   }
   .activity-row {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
+    gap: 6px;
   }
   .activity-chip {
-    min-height: 53px;
-    min-width: 0;
-    flex-direction: row;
-    gap: 8px;
-    padding: 10px 13px;
-    border-radius: 12px;
+    min-height: 58px;
+    padding: 6px 2px;
+    font-size: 11px;
   }
   .activity-chip svg {
     width: 21px;
@@ -984,7 +966,13 @@ h2 {
   .video-meta {
     min-height: 158px;
   }
+  .activity-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .activity-chip {
+    min-height: 48px;
+    flex-direction: row;
+    gap: 8px;
     padding-inline: 10px;
     font-size: 12px;
   }
