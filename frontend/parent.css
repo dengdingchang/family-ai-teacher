@@ -309,6 +309,38 @@ h3 {
   margin: 0 0 18px;
   max-width: 64ch;
 }
+.today-questions {
+  margin-bottom: 20px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid var(--line);
+}
+.today-questions h3,
+.journal-questions h3 {
+  margin: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+.today-questions .question-quotes,
+.journal-questions .question-quotes {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 9px 0 0;
+  padding: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.question-quotes li {
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.journal-questions {
+  margin-top: 14px;
+}
 .timeline {
   display: grid;
   gap: 14px;

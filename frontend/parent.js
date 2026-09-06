@@ -116,6 +116,23 @@ function formatInteractionTime(seconds, available) {
   return `${minutes}分${wholeSeconds % 60}秒`;
 }
 
+function appendQuestionQuotes(root, values, title) {
+  const questions = (Array.isArray(values) ? values : [])
+    .filter(value => typeof value === "string" && value.trim());
+  if (!questions.length) return false;
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("ul");
+  list.className = "question-quotes";
+  for (const question of questions) {
+    const item = document.createElement("li");
+    item.textContent = `“${question.trim()}”`;
+    list.append(item);
+  }
+  root.append(heading, list);
+  return true;
+}
+
 function renderToday(today) {
   byId("todayInteractionTime").textContent = formatInteractionTime(
     today.interaction_seconds,
@@ -130,6 +147,9 @@ function renderToday(today) {
       ? `今天一起聊到了${today.topics.join("、")}。看看孩子说了什么，哪些好奇可以在生活里接着探索。`
       : "今天的交流已经留在这里。听见孩子的想法，就是陪伴的一部分。"
     : "今天的故事还没开始。孩子说出的第一个问题，会从这里留下记录。";
+  const questions = byId("todayQuestions");
+  questions.replaceChildren();
+  questions.hidden = !appendQuestionQuotes(questions, today.questions, "今天好奇的问题");
   const timeline = byId("todayTimeline");
   timeline.replaceChildren();
   if (!today.recent_turns?.length) {
@@ -574,6 +594,9 @@ function renderJournalPage() {
     title.textContent = `${entry.week} · ${entry.summary || `${entry.conversation_turns || 0} 轮互动`}`;
     const list = document.createElement("ul");
     const companionshipCount = appendCompanionshipRequests(list, entry.companionship_requests);
+    const questions = document.createElement("section");
+    questions.className = "journal-questions";
+    const hasQuestions = appendQuestionQuotes(questions, entry.questions, "这一周的好奇");
     const facts = [
       ...(entry.learning_progress || [])
         .slice(0, 4)
@@ -595,13 +618,15 @@ function renderJournalPage() {
         .map((value) => `真实观察：${value}`),
       entry.recommendation ? `下一步：${entry.recommendation}` : "",
     ].filter(Boolean);
-    if (!facts.length && !companionshipCount) facts.push("这一周还没有形成足够的成长证据。");
+    if (!facts.length && !companionshipCount && !hasQuestions) facts.push("这一周还没有形成足够的成长证据。");
     for (const fact of facts) {
       const item = document.createElement("li");
       item.textContent = fact;
       list.append(item);
     }
-    card.append(title, list);
+    card.append(title);
+    if (facts.length || companionshipCount) card.append(list);
+    if (hasQuestions) card.append(questions);
     root.append(card);
   }
 }

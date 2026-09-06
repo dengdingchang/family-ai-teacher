@@ -39,6 +39,7 @@ function setup() {
     source.slice(source.indexOf('const statusLabels ='), source.indexOf('const defaultActivities ='))
     + '\nlet allJournal = []; let journalVisible = 4;\n'
     + source.slice(source.indexOf('function formatTime('), source.indexOf('function listText('))
+    + source.slice(source.indexOf('function appendQuestionQuotes('), source.indexOf('function renderToday('))
     + source.slice(source.indexOf('function skillStatusLabel('), source.indexOf('function renderMemories('))
     + source.slice(source.indexOf('function renderJournal('), source.indexOf('async function loadDashboard(')),
     context,

@@ -15,7 +15,7 @@ This is a product interface. Restrained color carries function: forest green is 
 - Danger: `oklch(.48 .14 28)`. Warning: `oklch(.60 .12 70)`.
 - Typography: local Segoe UI / PingFang SC / Microsoft YaHei / system-ui; no network fonts.
 - Child title 27px, section title 21px, voice action 20px, conversation text 15px. Parent title 36px, section title 22px, text 13–16px. Mobile uses fixed smaller steps.
-- Children’s main controls are at least 48px, the microphone 66–68px. 3px visible keyboard focus. Reduced motion disables all animation.
+- Children’s main controls are at least 48px, the microphone 56px in the compact left control area. 3px visible keyboard focus. Reduced motion disables all animation.
 - Corners: child stage 26px, video 16px, control 18px; parent sections 17px, form controls 9–10px.
 
 ## Child surface
@@ -42,6 +42,8 @@ Keep the voice controls usable while drawing and put concise feedback beside the
 Reading order is today, growth journal, learning states, family memory, then expandable settings. Dad’s message is prominent beside today. Technical endpoints and model identifiers do not belong in growth content.
 
 Statistics are a compact text strip, without fabricated growth percentages. Topic contact is labeled as contact, not competence. Confirmed milestones and candidates use different wording. Empty states explain what a real conversation will provide.
+
+Keep the child's recorded questions visible independently of the recent conversation timeline: a quiet list of original words in today's overview and the weekly journal. Reuse the existing dashboard fields; do not label them as a complete archive, infer mastery from curiosity, or add a blank section when no questions are available.
 
 The memory library fetches the complete local collection independently of the dashboard preview. Search and type filters operate over the full collection, with ten visible records per page. Corrections are inline. Mutations show pending/success/failure, preserve typed content on failure, and do not overwrite unsaved profile changes. Destructive data actions remain progressively disclosed and keep their existing confirmation safeguards.
 
