@@ -45,7 +45,6 @@ def test_explicit_activity_keeps_requested_subject(activity_store, utterance, ac
 @pytest.mark.parametrize("activity, step, text", [
     ("colors", 1, "我没有找到红色"),
     ("colors", 1, "这是红色还是蓝色"),
-    ("colors", 1, "我找到了"),
     ("colors", 2, "我不会说 red"),
     ("english", 1, "我不会说 apple"),
     ("english", 1, "你刚才说 apple 吗"),

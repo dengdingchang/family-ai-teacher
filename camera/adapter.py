@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 import shutil
 import subprocess
 import tempfile
@@ -88,10 +89,41 @@ class BrowserCameraAdapter:
                     check=True,
                 )
                 duration_s = max(0.0, float(probe.stdout.strip()))
+                if not math.isfinite(duration_s):
+                    duration_s = 0.0
             except (OSError, ValueError, subprocess.SubprocessError):
-                # Browser clips can omit duration metadata; first-frame fallback
-                # is still useful and does not block the rest of the conversation.
                 duration_s = 0.0
+
+            if duration_s == 0.0:
+                # MediaRecorder WebM commonly has no container duration. Its
+                # video packet timestamps still locate the beginning/middle/end
+                # without treating the whole action as a single photograph.
+                try:
+                    packets = subprocess.run(
+                        [ffprobe, "-v", "error", "-select_streams", "v:0",
+                         "-show_entries", "packet=pts_time,duration_time",
+                         "-of", "csv=p=0", str(video_path)],
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=8, check=True,
+                    )
+                    first_timestamp, last_end = None, None
+                    for line in packets.stdout.splitlines():
+                        values = line.split(",")
+                        try:
+                            timestamp = float(values[0])
+                            span = float(values[1]) if len(values) > 1 and values[1] != "N/A" else 0.0
+                        except ValueError:
+                            continue
+                        if math.isfinite(timestamp) and math.isfinite(span):
+                            end = timestamp + max(0.0, span)
+                            first_timestamp = timestamp if first_timestamp is None else min(first_timestamp, timestamp)
+                            last_end = end if last_end is None else max(last_end, end)
+                    if first_timestamp is not None:
+                        duration_s = max(0.0, last_end - first_timestamp)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    # Malformed/unsupported clips retain the bounded first-frame
+                    # attempt and the existing honest decode error if it fails.
+                    duration_s = 0.0
 
             if duration_s > 0.2:
                 times = [0.0, duration_s / 2.0, max(0.0, duration_s - 0.2)]

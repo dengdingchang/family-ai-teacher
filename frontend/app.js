@@ -76,22 +76,26 @@ let segmentShouldSend = false;
 let activeRequestController = null;
 let activeRequestSource = "";
 let drawingBoard = null;
+let chessBoard = null;
+let chessSpeechController = null;
+let chessSpeechGeneration = 0;
+let chessOpenGeneration = 0;
 let interruptedRequestController = null;
 let activeTurnId = null;
 let bargeInTimer = null;
 let bargeInMonitoring = false;
 let bargeInPcmChunks = [];
 
-const VAD_INTERVAL_MS = 80;
+const VAD_INTERVAL_MS = 40;
 const VAD_START_RMS = 0.045;
 const VAD_STOP_RMS = 0.028;
-const VAD_START_HOLD_MS = 140;
-const VAD_SILENCE_MS = 850;
+const VAD_START_HOLD_MS = 80;
+const VAD_SILENCE_MS = 1200;
 const VAD_MAX_SEGMENT_MS = 12000;
 const BARGE_IN_START_RMS = 0.075;
 const BARGE_IN_HOLD_MS = 240;
 const BARGE_IN_INTERVAL_MS = 40;
-const BARGE_IN_PREROLL_CHUNKS = 6;
+const PCM_PREROLL_SECONDS = 1;
 // A measured relay path adds about 0.5 s round-trip latency. Keep this wait
 // bounded, while allowing its first decodable video packet to arrive.
 const STREAM_AVATAR_FIRST_FRAME_WAIT_MS = 2000;
@@ -670,7 +674,8 @@ async function playAudioPayload(payload, generation) {
   activeAudioUrl = URL.createObjectURL(blob);
   const audio = new Audio(activeAudioUrl);
   const timingSessionId = globalThis.familyInteractionClock?.sessionId;
-  const trackInteraction = typeof activeRequestSource === "undefined" || activeRequestSource !== "drawing-observation";
+  const trackInteraction = typeof activeRequestSource === "undefined"
+    || !["drawing-observation", "chess-explanation"].includes(activeRequestSource);
   activeAudio = audio;
   const activeAudioUrlForPlayback = activeAudioUrl;
   const frameSerialAtCue = avatarFrameSerial;
@@ -950,6 +955,7 @@ async function completeConversationTurn(turnId) {
 }
 
 async function sendStreamingRequest({ endpoint, body, continuous = false, signal = null, source = "", onText = null }) {
+  if (typeof chessSpeechController !== "undefined" && chessSpeechController) cancelChessExplanation();
   if (activeRequestController) return { ok: false, busy: true };
   if (signal?.aborted) return { ok: false, aborted: true };
   continuous = continuous || conversationActive;
@@ -988,8 +994,22 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
   let commitRequired = false;
   let turnCommitted = false;
   let receivedDone = false;
+  let chessRequested = false;
+  let chessContextGeneration = null;
   try {
     const audioStreaming = typeof prepareStreamingAudio === "function" && await prepareStreamingAudio();
+    if ((endpoint === "/api/conversation/stream" || endpoint === "/api/conversation/text/stream")
+        && typeof chessBoard !== "undefined" && chessBoard?.isOpen && activityEnabled("game")) {
+      try {
+        const context = chessBoard.getConversationContext?.();
+        if (typeof context === "string" && context.trim()) {
+          const value = context.trim().slice(0, 3000);
+          if (body instanceof FormData) body.append("chess_context", value);
+          else body = JSON.stringify({ ...JSON.parse(body), chess_context: value });
+          chessContextGeneration = chessOpenGeneration;
+        }
+      } catch (_) { /* Optional board facts must not interrupt an ordinary voice turn. */ }
+    }
     let observationRequest = "";
     for (let captureAttempt = 0; captureAttempt < 2; captureAttempt++) {
       observationRequest = "";
@@ -1005,8 +1025,10 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
         signal: controller.signal,
       });
       await consumeSse(response, (event) => {
-        if (controller.signal.aborted) return;
-        if (event.event === "vision_request") {
+        if (controller.signal.aborted || chessRequested) return;
+        if (event.event === "chess_request") {
+          chessRequested = true;
+        } else if (event.event === "vision_request") {
           observationRequest = event.text || "";
         } else if (event.event === "user_text") {
           if (source !== "drawing-observation" && String(event.text || "").trim()) globalThis.familyInteractionClock?.confirmInput(timingSessionId);
@@ -1075,6 +1097,12 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
       endpoint = "/api/conversation/stream";
       body = observed;
     }
+    if (chessRequested) {
+      if (controller.signal.aborted || playbackGeneration !== queueGeneration) return { ok: false, aborted: true };
+      hideLiveTurn();
+      stopBargeInMonitor();
+      return { ok: true, chess: true };
+    }
     if (!receivedDone) throw new Error("连接中断，这次回答还没有完整结束");
     if (streamError) throw new Error(streamError);
     await waitForAudioQueue();
@@ -1100,6 +1128,13 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
       if (completion.history) appendHistoryRecord(completion.history);
     }
     if (source === "drawing-observation") await cancelConversationTurn(turnId);
+    if (turnCommitted && chessContextGeneration !== null && chessContextGeneration === chessOpenGeneration
+        && chessBoard?.isOpen && activityTransition
+        && (activityTransition.action === "clear" || (activityTransition.action === "set"
+          && typeof activityTransition.activity === "string" && activityTransition.activity))) {
+      activeRequestSource = "";
+      chessBoard.close();
+    }
     if (turnCommitted && typeof drawingBoard !== "undefined" && drawingBoard?.isOpen && activityTransition
         && (activityTransition.action === "clear" || (activityTransition.action === "set"
           && typeof activityTransition.activity === "string" && activityTransition.activity && activityTransition.activity !== "drawing"))) {
@@ -1130,6 +1165,8 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
     return { ok: false, error: message };
   } finally {
     signal?.removeEventListener("abort", cancelFromCaller);
+    const openRequestedChess = chessRequested && !controller.signal.aborted
+      && playbackGeneration === queueGeneration && activeRequestController === controller;
     if (activeRequestController === controller) {
       activeRequestController = null;
       activeRequestSource = "";
@@ -1138,6 +1175,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
     if (activeTurnId === turnId) activeTurnId = null;
     if (!conversationActive) globalThis.familyInteractionClock?.end(timingSessionId);
     setBusy(false);
+    if (openRequestedChess) void openChessActivity();
   }
 }
 
@@ -1274,8 +1312,19 @@ function checkVoiceActivity() {
     finishContinuousSegment();
     return;
   }
-  if (!speechStartedAt && segmentPcmChunks.length > 120) segmentPcmChunks = [];
   scheduleVad();
+}
+
+function retainRecentPcm(chunks, sampleRate, seconds = PCM_PREROLL_SECONDS) {
+  let remaining = Math.ceil(sampleRate * seconds);
+  const recent = [];
+  for (let index = chunks.length - 1; index >= 0 && remaining > 0; index--) {
+    const chunk = chunks[index];
+    const count = Math.min(chunk.length, remaining);
+    recent.push(count === chunk.length ? chunk : chunk.subarray(chunk.length - count));
+    remaining -= count;
+  }
+  return recent.reverse();
 }
 
 function writeWavString(view, offset, value) {
@@ -1397,9 +1446,15 @@ async function startContinuousConversation() {
       const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
       if (segmentRecording) {
         segmentPcmChunks.push(chunk);
+        // Keep the beginning of a word while VAD confirms its onset. Once
+        // speech is confirmed, retain the complete sentence until submission.
+        if (!speechStartedAt) segmentPcmChunks = retainRecentPcm(segmentPcmChunks, inputSampleRate);
       } else if (bargeInMonitoring) {
         bargeInPcmChunks.push(chunk);
-        if (bargeInPcmChunks.length > BARGE_IN_PREROLL_CHUNKS) bargeInPcmChunks.shift();
+        // The detection window may span several syllables. Include one input
+        // block beyond it, including at sample rates with longer blocks.
+        const seconds = Math.max(PCM_PREROLL_SECONDS, bargeInGate.windowMs / 1000 + chunk.length / inputSampleRate);
+        bargeInPcmChunks = retainRecentPcm(bargeInPcmChunks, inputSampleRate, seconds);
       }
     };
     inputSource.connect(inputProcessor);
@@ -1438,6 +1493,7 @@ function stopContinuousConversation() {
 }
 
 recordButton.addEventListener("click", async () => {
+  cancelChessExplanation();
   if (conversationActive) {
     stopContinuousConversation();
     return;
@@ -1504,6 +1560,136 @@ async function interruptActiveReply() {
   if (activeRequestController === previous) throw new Error("上一句话正在结束，请稍后再试一次");
 }
 
+function cancelChessExplanation(resumeListening = false) {
+  chessSpeechGeneration += 1;
+  const controller = chessSpeechController;
+  chessSpeechController = null;
+  controller?.abort();
+  if (resumeListening && conversationActive && !conversationStarting
+      && !activeRequestController && !segmentRecording) beginContinuousSegment();
+}
+
+async function speakChessInstruction(text) {
+  cancelChessExplanation();
+  const instruction = String(text || "").trim();
+  if (!chessBoard?.isOpen || !activityEnabled("game")) return { ok: false, aborted: true };
+  if (conversationActive && segmentRecording && (speechStartedAt || loudSince)) {
+    return { ok: false, error: "我先听你说。想听棋盘讲解时，可以点“再听一遍”。" };
+  }
+  if (conversationStarting) return { ok: false, error: "麦克风还在准备，可以先下棋，稍后再听讲解。" };
+  if (!instruction || instruction.length > 200) {
+    cancelChessExplanation(true);
+    return { ok: false, error: "这句讲解太长了，先看棋盘上的提示吧。" };
+  }
+  const generation = chessSpeechGeneration;
+  const controller = new AbortController();
+  chessSpeechController = controller;
+  const current = () => chessSpeechController === controller && generation === chessSpeechGeneration
+    && !controller.signal.aborted && chessBoard?.isOpen && activityEnabled("game");
+  let timeout = null;
+  let timedOut = false;
+  const releasePlayback = () => {
+    if (activeRequestController !== controller) return;
+    clearResponseQueue();
+    cancelPlayback();
+    stopBargeInMonitor();
+    activeRequestController = null;
+    activeRequestSource = "";
+    if (interruptedRequestController === controller) interruptedRequestController = null;
+    setBusy(false);
+  };
+  controller.signal.addEventListener("abort", releasePlayback, { once: true });
+  try {
+    await interruptActiveReply();
+    if (!current()) return { ok: false, aborted: true };
+    // Discard only the unfinished capture; keep the already-open microphone.
+    stopVadLoop();
+    segmentRecording = false;
+    segmentShouldSend = false;
+    segmentPcmChunks = [];
+    speechStartedAt = 0;
+    clearResponseQueue();
+    cancelPlayback();
+    const playbackGeneration = queueGeneration;
+    activeRequestController = controller;
+    activeRequestSource = "chess-explanation";
+    activeTurnId = null;
+    setBusy(true);
+    setStatus("爸爸老师正在准备讲解棋盘…", "thinking");
+    if (conversationActive) startBargeInMonitor();
+    timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 30000);
+    const response = await fetch("/api/tts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: instruction }), signal: controller.signal,
+    });
+    if (!current()) return { ok: false, aborted: true };
+    const payload = await response.json();
+    if (!current() || playbackGeneration !== queueGeneration) return { ok: false, aborted: true };
+    if (!response.ok || !payload?.audio_base64) throw new Error("chess voice unavailable");
+    clearTimeout(timeout);
+    timeout = null;
+    setStatus("爸爸老师正在讲解棋盘…", "speaking");
+    // /api/tts supplies audio/avatar PCM only: no child turn or delivery receipt.
+    await playAudioPayload(payload, playbackGeneration);
+    if (!current() || playbackGeneration !== queueGeneration) return { ok: false, aborted: true };
+    return { ok: true };
+  } catch (_) {
+    if ((!current() && !timedOut) || chessSpeechController !== controller
+        || generation !== chessSpeechGeneration) return { ok: false, aborted: true };
+    return { ok: false, error: "这次讲解的声音没播出来。可以点“再听一遍”，棋盘还能继续玩。" };
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+    controller.signal.removeEventListener("abort", releasePlayback);
+    releasePlayback();
+    if (chessSpeechController === controller) {
+      chessSpeechController = null;
+      if (conversationActive && !segmentRecording && !activeRequestController) beginContinuousSegment();
+      else if (!conversationActive && !activeRequestController) setStatus("看看棋盘，轮到你来试试", "idle");
+    } else if (!chessSpeechController && !chessBoard?.isOpen && !drawingBoard?.isOpen
+        && conversationActive && !conversationStarting && !segmentRecording && !activeRequestController) {
+      // Closing during a previous conversation's cancellation still resumes
+      // listening after that request has released its controller.
+      beginContinuousSegment();
+    }
+  }
+}
+
+function getChessBoard() {
+  if (chessBoard) return chessBoard;
+  chessBoard = new globalThis.ChessBoard({
+    onSpeak: speakChessInstruction,
+    onClose: () => cancelChessExplanation(true),
+  });
+  return chessBoard;
+}
+
+async function openChessActivity() {
+  if (!activityEnabled("game")) return;
+  const generation = ++chessOpenGeneration;
+  void prepareStreamingAudio();
+  let timer = null;
+  try {
+    if (typeof globalThis.ChessBoard !== "function") {
+      await Promise.race([
+        import("/chess-board.js?v=20260906-1"),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("chess module timeout")), 5000); }),
+      ]);
+    }
+    if (generation !== chessOpenGeneration || !activityEnabled("game")) return;
+    drawingBoard?.close();
+    const board = getChessBoard();
+    if (board.isOpen && conversationActive && !activeRequestController && !segmentRecording) beginContinuousSegment();
+    board.open();
+  } catch (_) {
+    if (generation !== chessOpenGeneration) return;
+    setStatus("棋盘正在准备，其他活动可以继续用", "idle");
+    recordHint.textContent = "棋盘暂时没打开，可以稍后再点“下棋”。";
+    if (conversationActive && !activeRequestController && !segmentRecording) beginContinuousSegment();
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
 function getDrawingBoard() {
   if (drawingBoard) return drawingBoard;
   drawingBoard = globalThis.createDrawingBoard({
@@ -1543,6 +1729,8 @@ function getDrawingBoard() {
 
 async function openDrawingActivity(button) {
   if (!activityEnabled("drawing") || conversationStarting) return;
+  chessOpenGeneration += 1;
+  chessBoard?.close();
   const board = getDrawingBoard();
   board.open();
   void prepareStreamingAudio();
@@ -1561,9 +1749,10 @@ async function openDrawingActivity(button) {
 }
 
 for (const button of activityButtons) {
-  button.addEventListener("click", () => void (button.dataset.activity === "drawing"
-    ? openDrawingActivity(button) : startActivityConversation(button)));
+  button.addEventListener("click", () => void (button.dataset.chess === "true" ? openChessActivity()
+    : button.dataset.activity === "drawing" ? openDrawingActivity(button) : startActivityConversation(button)));
 }
+window.addEventListener("pagehide", () => { chessOpenGeneration += 1; cancelChessExplanation(); });
 
 const cameraVideo = document.querySelector("#cameraVideo");
 const cameraToolbar = document.querySelector("#cameraToolbar");
@@ -1579,6 +1768,8 @@ let cameraStream = null;
 let capturedUrl = null;
 let capturedBlob = null;
 let videoRecorder = null;
+let videoRecordingGeneration = 0;
+let videoRequestController = null;
 let videoChunks = [];
 let videoStopTimer = null;
 const MANUAL_VIDEO_MAX_MS = 6000;
@@ -1609,6 +1800,7 @@ async function loadChildProfileControls() {
     button.hidden = !activityEnabled(String(button.dataset.activity || ""));
   }
   if (drawingBoard?.isOpen && !activityEnabled("drawing")) drawingBoard.close();
+  if (chessBoard?.isOpen && !activityEnabled("game")) chessBoard.close();
   const activityRow = document.querySelector(".activity-row");
   if (activityRow) activityRow.hidden = activityButtons.every((button) => button.hidden);
   captureButton.hidden = !activityEnabled("vision_photo");
@@ -1666,7 +1858,7 @@ cameraButton.addEventListener("click", async () => {
 });
 
 function stopCameraStream() {
-  stopVideoRecording();
+  stopVideoRecording(true);
   cameraStream?.getTracks().forEach((track) => track.stop());
   cameraStream = null;
   cameraVideo.srcObject = null;
@@ -1780,50 +1972,87 @@ function supportedVideoMimeType() {
 async function startVideoRecording() {
   if (!activityEnabled("vision_video")) throw new Error("爸爸暂时关闭了短视频活动");
   if (!window.MediaRecorder) throw new Error("当前浏览器不支持短视频录制");
+  stopVideoRecording(true);
+  const generation = videoRecordingGeneration;
+  const isCurrent = () => generation === videoRecordingGeneration;
   await ensureCameraStream();
+  if (!isCurrent()) return;
   if (!cameraStream?.active) throw new Error("请先打开摄像头");
   const mimeType = supportedVideoMimeType();
-  videoChunks = [];
-  videoRecorder = new MediaRecorder(cameraStream, mimeType ? { mimeType } : undefined);
-  videoRecorder.ondataavailable = (event) => {
-    if (event.data?.size) videoChunks.push(event.data);
+  const chunks = [];
+  videoChunks = chunks;
+  const recorder = new MediaRecorder(cameraStream, mimeType ? { mimeType } : undefined);
+  videoRecorder = recorder;
+  let recordingFailed = false;
+  recorder.ondataavailable = (event) => {
+    if (isCurrent() && event.data?.size) chunks.push(event.data);
   };
-  videoRecorder.onerror = () => {
+  recorder.onerror = () => {
+    recordingFailed = true;
+    if (!isCurrent()) return;
     visionResult.hidden = false;
     visionResult.textContent = "短视频录制失败";
   };
-  videoRecorder.onstop = async () => {
+  recorder.onstop = async () => {
+    if (!isCurrent()) return;
     clearTimeout(videoStopTimer);
     videoStopTimer = null;
-    const clip = new Blob(videoChunks, { type: videoRecorder?.mimeType || mimeType || "video/webm" });
+    const clip = new Blob(chunks, { type: recorder.mimeType || mimeType || "video/webm" });
+    chunks.length = 0;
     videoChunks = [];
     videoRecorder = null;
     recordVideoButton.classList.remove("recording");
     recordVideoButton.textContent = "▷";
     setCameraActionState(Boolean(cameraStream?.active));
+    if (recordingFailed) {
+      cameraStatus.textContent = "短视频录制失败，请再试一次";
+      return;
+    }
     if (!clip.size) {
       cameraStatus.textContent = "没有录到画面";
       return;
     }
     visionResult.hidden = false;
     visionResult.textContent = "爸爸正在看这段动作…";
-    cameraStatus.textContent = "短视频已发送，正在分析";
+    cameraStatus.textContent = "视频已录好，准备给爸爸看";
     recordVideoButton.disabled = true;
+    const controller = new AbortController();
+    videoRequestController = controller;
+    let submitted = false;
     try {
+      // A completed, explicitly requested clip takes precedence over the old
+      // voice reply. Reuse its cancellation/receipt path before sending media.
+      await interruptActiveReply();
+      if (!isCurrent() || controller.signal.aborted) return;
       const form = new FormData();
       form.append("video", clip, "child-action.webm");
-      const result = await sendStreamingRequest({ endpoint: "/api/conversation/video/stream", body: form });
+      cameraStatus.textContent = "短视频已发送，正在分析";
+      submitted = true;
+      const result = await sendStreamingRequest({ endpoint: "/api/conversation/video/stream", body: form,
+        source: "video", signal: controller.signal });
+      if (!isCurrent() || controller.signal.aborted) return;
+      if (result?.aborted || result?.interrupted) {
+        cameraStatus.textContent = "这段视频的回答已停止";
+        visionResult.textContent = "可以继续说话，或者再录一段";
+        return;
+      }
+      if (result?.busy) {
+        submitted = false;
+        throw new Error("上一句话还在结束，这段视频没有发送，请再录一次");
+      }
       if (!result?.ok) throw new Error(result?.error || "短视频分析失败");
       captureState.textContent = "爸爸看到了动作";
       cameraStatus.textContent = "爸爸正在回答 · 原片未保存";
     } catch (error) {
+      if (!isCurrent() || controller.signal.aborted) return;
       visionResult.textContent = error.message || "短视频分析失败";
-      cameraStatus.textContent = "短视频分析失败";
+      cameraStatus.textContent = submitted ? "短视频分析失败" : "视频还没有发送";
     } finally {
-      setCameraActionState(Boolean(cameraStream?.active));
+      if (videoRequestController === controller) videoRequestController = null;
+      if (isCurrent()) setCameraActionState(Boolean(cameraStream?.active));
     }
   };
-  videoRecorder.start(250);
+  recorder.start(250);
   recordVideoButton.classList.add("recording");
   recordVideoButton.textContent = "■";
   recordVideoButton.title = "停止录制并给爸爸看";
@@ -1832,10 +2061,21 @@ async function startVideoRecording() {
   videoStopTimer = setTimeout(stopVideoRecording, MANUAL_VIDEO_MAX_MS);
 }
 
-function stopVideoRecording() {
+function stopVideoRecording(discard = false) {
   clearTimeout(videoStopTimer);
   videoStopTimer = null;
-  if (videoRecorder && videoRecorder.state !== "inactive") videoRecorder.stop();
+  const recorder = videoRecorder;
+  if (discard) {
+    videoRecordingGeneration++;
+    videoRequestController?.abort();
+    videoRequestController = null;
+    videoChunks.length = 0;
+    videoRecorder = null;
+    recordVideoButton.classList.remove("recording");
+    recordVideoButton.textContent = "▷";
+    setCameraActionState(Boolean(cameraStream?.active));
+  }
+  if (recorder && recorder.state !== "inactive") recorder.stop();
 }
 
 recordVideoButton.addEventListener("click", async () => {

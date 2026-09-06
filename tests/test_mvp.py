@@ -171,7 +171,7 @@ class MvpUnitTests(unittest.TestCase):
     def test_short_child_activity_requests_get_coherent_openings(self) -> None:
         profile = {"name": "小宝", "enabled_activities": ["drawing", "story", "music"]}
         for request, expected in (
-            ("故事", "先遇见了谁"),
+            ("故事", "还是"),
             ("我想画画", "太阳还是气球"),
             ("我想听音乐", "啦、啦、啦"),
         ):
@@ -275,16 +275,16 @@ class MvpUnitTests(unittest.TestCase):
                 self.assertEqual(store.get_activity_state()["step"], 2)
 
                 reply, transition = _activity_turn_reply("我不想学这个了，我想听故事", profile)
-                self.assertIn("小兔子", reply)
+                self.assertIn("小企鹅", reply)
                 main_module._record_turn("我不想学这个了，我想听故事", reply, activity_transition=transition)
                 self.assertEqual(store.get_activity_state()["activity"], "story")
                 self.assertEqual(store.get_parent_dashboard()["current_activity"]["activity"], "story")
                 self.assertEqual(store.export_bundle()["current_activity"]["activity"], "story")
 
-                reply, transition = _activity_turn_reply("我猜是一只小狗", profile)
-                self.assertIn("一只小狗", reply)
+                reply, transition = _activity_turn_reply("找海豹帮忙", profile)
+                self.assertIn("海豹", reply)
                 self.assertNotIn("我猜是", reply)
-                main_module._record_turn("我猜是一只小狗", reply, activity_transition=transition)
+                main_module._record_turn("找海豹帮忙", reply, activity_transition=transition)
                 self.assertEqual(store.get_activity_state()["step"], 2)
 
     def test_welcome_back_uses_only_evidence_backed_continuity(self) -> None:

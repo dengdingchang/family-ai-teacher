@@ -1,0 +1,55 @@
+.chess-board {
+  position: fixed; inset: 0; z-index: 10020; width: 100%; height: 100dvh;
+  display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
+  color: #173e36; background: #fff; font: 16px "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+.chess-board[hidden] { display: none; }
+.chess-board *, .chess-board *::before, .chess-board *::after { box-sizing: border-box; }
+.chess-board__header { display: flex; align-items: center; gap: 20px; padding: max(12px, env(safe-area-inset-top)) 24px 12px; border-bottom: 1px solid #dddccd; }
+.chess-board__heading { min-width: 0; }
+.chess-board__heading h2 { margin: 0; font-size: 24px; }
+.chess-board__heading p { margin: 4px 0 0; color: #60746c; font-size: 14px; }
+.chess-board__button { min-width: 48px; min-height: 48px; border: 1px solid #ccd7ca; border-radius: 12px; padding: 10px 16px; color: #173e36; background: #f8f8f2; font: inherit; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+.chess-board__button:hover:not(:disabled) { background: #e9f1e7; }
+.chess-board__button:disabled { opacity: .45; cursor: default; }
+.chess-board__button:focus-visible, .chess-board__square:focus-visible { outline: 3px solid #bd780f; outline-offset: -3px; }
+.chess-board__back, .chess-board__next { color: #fff; background: #205844; border-color: #205844; }
+.chess-board__back:hover:not(:disabled), .chess-board__next:hover:not(:disabled) { background: #143f30; }
+.chess-board__modes { display: flex; gap: 10px; padding: 14px 24px; }
+.chess-board__modes .chess-board__button[aria-pressed="true"] { background: #deedde; border-color: #205844; box-shadow: inset 0 0 0 1px #205844; }
+.chess-board__content { display: grid; grid-template-columns: minmax(0, 560px) minmax(230px, 330px); justify-content: center; align-items: start; gap: 28px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px 24px max(24px, env(safe-area-inset-bottom)); }
+.chess-board__board-area, .chess-board__panel { min-width: 0; }
+.chess-board__grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); width: 100%; aspect-ratio: 1; border: 2px solid #355b43; border-radius: 8px; overflow: hidden; }
+.chess-board__square { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: #f3eedf; color: #163325; font: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; }
+.chess-board__square.is-dark { background: #91ad8c; }
+.chess-board__square.is-selected { background: #e2c86d; box-shadow: inset 0 0 0 3px #78611b; }
+.chess-board__square.is-legal::after { content: ""; position: absolute; width: 24%; height: 24%; border-radius: 50%; background: #186344a8; pointer-events: none; }
+.chess-board__square.is-legal:has(.chess-board__piece:not(:empty))::after { width: 90%; height: 90%; border: 4px solid #186344; background: none; }
+.chess-board__piece { position: relative; z-index: 1; font: clamp(25px, 5vw, 56px)/1 "Segoe UI Symbol", "Noto Sans Symbols 2", serif; pointer-events: none; }
+.chess-board__piece.is-white { color: #fffdf5; text-shadow: -1px -1px #263b29, 1px 1px #263b29, 1px -1px #263b29, -1px 1px #263b29; }
+.chess-board__piece.is-black { color: #182c23; text-shadow: 0 1px #d5dec5; }
+.chess-board__coordinate { position: absolute; left: 3px; bottom: 1px; font-size: 10px; line-height: 1.2; opacity: .85; pointer-events: none; }
+.chess-board__target { position: absolute; z-index: 2; right: 3px; top: 1px; color: #8c5a06; text-shadow: 0 1px #fff; font-size: 19px; pointer-events: none; }
+.chess-board__target[hidden] { display: none; }
+.chess-board__board-hint { margin: 10px 0; color: #60746c; font-size: 14px; line-height: 1.5; }
+.chess-board__panel { padding: 20px; border: 1px solid #e0e2d5; border-radius: 18px; background: #fbfaf5; }
+.chess-board__lesson-title { margin: 0; font-size: 21px; line-height: 1.5; }
+.chess-board__turn { font-weight: 700; color: #205844; line-height: 1.5; }
+.chess-board__feedback { font-size: 19px; line-height: 1.7; overflow-wrap: anywhere; }
+.chess-board__tools { display: flex; gap: 10px; flex-wrap: wrap; }
+.chess-board__tools .chess-board__button { flex: 1 1 calc(50% - 5px); }
+.chess-board__button[hidden] { display: none; }
+.chess-board__speech { color: #60746c; font-size: 14px; line-height: 1.5; margin-bottom: 0; }
+@media (max-width: 760px) {
+  .chess-board__header { padding-left: 12px; padding-right: 12px; gap: 12px; }
+  .chess-board__heading h2 { font-size: 20px; }
+  .chess-board__heading p { font-size: 12px; }
+  .chess-board__modes { padding: 12px; gap: 8px; }
+  .chess-board__modes .chess-board__button { flex: 1; padding: 10px; }
+  .chess-board__content { grid-template-columns: minmax(0, 560px); padding: 0 12px max(16px, env(safe-area-inset-bottom)); gap: 10px; }
+  .chess-board__panel { padding: 16px; }
+  .chess-board__feedback { font-size: 17px; margin: 10px 0 16px; }
+  .chess-board__piece { font-size: clamp(26px, 9vw, 56px); }
+  .chess-board__coordinate { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) { .chess-board * { scroll-behavior: auto; } }

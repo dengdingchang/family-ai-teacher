@@ -249,7 +249,7 @@ def test_real_drawing_activity_controls_skip_vision_and_commit_after_playback(
     done = next(item for item in events(response) if item["event"] == "done")
     assert done["ok"] and done["commit_required"]
     assert "蓝色圆圈" not in done["assistant_text"]
-    assert runtime.model.calls == [] and runtime.model.text_calls == 0
+    assert runtime.model.calls == [] and runtime.model.text_calls == (1 if expected_activity == "story" else 0)
     transition = done["activity_transition"]
     assert transition["action"] == expected_action
     assert set(transition) == ({"action"} if expected_action == "clear" else {"action", "activity", "topic", "step"})

@@ -54,6 +54,11 @@ def journey(tmp_path, monkeypatch):
 
         def stream_chat(self, messages, **kwargs):
             model_prompts.append(messages)
+            if "本轮是共同讲故事" in messages[0]["content"]:
+                # The journey tests state/receipts rather than model creativity.
+                # Return the supplied coherent plan instead of an unrelated tower.
+                yield messages[0]["content"].split("本轮参考计划（可结合孩子回答创作，不能机械照抄不相关选项）：", 1)[1].split(" 本轮收尾", 1)[0].split(" 最后留", 1)[0]
+                return
             yield "你给积木塔加上了自己的想法。你想给它起什么名字？"
 
     class SimulatedVoice:

@@ -200,6 +200,21 @@ h2 {
 .child-video .video-frame {
   background: oklch(0.936 0.025 71);
 }
+@media (min-width: 641px) {
+  .dad-video {
+    display: flex;
+    flex-direction: column;
+  }
+  .dad-video .video-frame {
+    flex: 1;
+    aspect-ratio: auto;
+    max-height: none;
+  }
+  .dad-video #avatarImage {
+    position: absolute;
+    inset: 0;
+  }
+}
 #avatarImage,
 #avatarIdle,
 #avatarCanvas,
@@ -425,7 +440,7 @@ h2 {
 }
 .conversation-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 224px;
+  grid-template-columns: minmax(0, 1fr) 288px;
   align-items: start;
   gap: 12px;
   min-width: 0;
@@ -505,7 +520,7 @@ h2 {
 }
 .activity-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: center;
   min-width: 0;
   gap: 8px;
@@ -895,6 +910,7 @@ h2 {
     margin-top: 7px;
   }
   .activity-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
   .activity-chip {
@@ -967,7 +983,7 @@ h2 {
     min-height: 158px;
   }
   .activity-row {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .activity-chip {
     min-height: 48px;
