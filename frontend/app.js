@@ -1,7 +1,7 @@
 import "/pcm-player.js?v=20260906-stream1";
 import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
-import "/drawing-board.js?v=20260906-2";
+import "/drawing-board.js?v=20260906-3";
 
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
@@ -1003,6 +1003,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
     ? globalThis.familyInteractionClock?.sessionId : globalThis.familyInteractionClock?.begin();
   if (continuous) startBargeInMonitor();
   let assistantText = "";
+  let activityTransition = null;
   let streamError = null;
   let commitRequired = false;
   let turnCommitted = false;
@@ -1052,6 +1053,9 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
           receivedDone = true;
           assistantText = event.assistant_text || assistantText;
           commitRequired = Boolean(event.commit_required);
+          if (source !== "drawing-observation" && event.activity_transition && typeof event.activity_transition === "object") {
+            activityTransition = event.activity_transition;
+          }
           if (assistantText) {
             answerBox.classList.add("has-answer");
             answerBox.textContent = assistantText;
@@ -1104,13 +1108,26 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
     if (!assistantText) throw new Error("爸爸老师没有返回文字回答");
     if (commitRequired) {
       const completion = await completeConversationTurn(turnId);
+      turnCommitted = true;
       if (interruptedRequestController === controller) {
         return { ok: false, interrupted: true };
       }
+      // A successful receipt may arrive after pause or a newer turn. Preserve
+      // the server's commit, but do not let this stale reply change the UI.
+      if (controller.signal.aborted || playbackGeneration !== queueGeneration || activeRequestController !== controller) {
+        return { ok: false, aborted: true };
+      }
       if (completion.history) appendHistoryRecord(completion.history);
-      turnCommitted = true;
     }
     if (source === "drawing-observation") await cancelConversationTurn(turnId);
+    if (turnCommitted && typeof drawingBoard !== "undefined" && drawingBoard?.isOpen && activityTransition
+        && (activityTransition.action === "clear" || (activityTransition.action === "set"
+          && typeof activityTransition.activity === "string" && activityTransition.activity && activityTransition.activity !== "drawing"))) {
+      // The reply and receipt are complete. Closing must not abort that finished
+      // voice turn, and the RAM drawing remains available when reopened.
+      activeRequestSource = "";
+      drawingBoard.close();
+    }
     hideLiveTurn();
     stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
@@ -1511,7 +1528,7 @@ function getDrawingBoard() {
   if (drawingBoard) return drawingBoard;
   drawingBoard = globalThis.createDrawingBoard({
     async onObserve(blob, revision, meta) {
-      if (!meta.isCurrent() || !activityEnabled("drawing")) return null;
+      if (!meta.isActive() || !activityEnabled("drawing")) return null;
       if (activeRequestController || conversationStarting || speechStartedAt || loudSince) return { deferred: true };
       const body = new FormData();
       body.append("transcript", "请看看这张正在画的画，简短说出一个可见的笔画或给一个画画建议。");

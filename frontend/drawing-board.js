@@ -13,7 +13,8 @@
       this.active = false; this.visible = true; this.enabled = true;
       this.revision = 0; this.epoch = 0; this.hasContent = false;
       this.dirty = false; this.busy = false; this.timer = null;
-      this.changedAt = 0; this.lastStarted = -Infinity; this.retryAt = 0; this.controller = null;
+      this.changedAt = 0; this.dirtySince = Infinity;
+      this.lastStarted = -Infinity; this.retryAt = 0; this.controller = null;
     }
     current(revision, epoch) {
       return this.active && this.visible && this.enabled && this.hasContent
@@ -27,50 +28,60 @@
     }
     setActive(value) {
       this.invalidate(); this.active = value;
-      if (value) { this.dirty = this.hasContent; this.changedAt = this.now(); }
+      if (value) { this.dirty = this.hasContent; this.dirtySince = this.changedAt = this.now(); }
       this.schedule();
     }
     setVisible(value) {
       if (this.visible === value) return;
       this.invalidate(); this.visible = value;
-      if (value) { this.dirty = this.hasContent; this.changedAt = this.now(); }
+      if (value) { this.dirty = this.hasContent; this.dirtySince = this.changedAt = this.now(); }
       this.schedule();
     }
     setEnabled(value) {
       if (this.enabled === value) return;
       this.invalidate(); this.enabled = value;
-      if (value) { this.dirty = this.hasContent; this.changedAt = this.now(); }
+      if (value) { this.dirty = this.hasContent; this.dirtySince = this.changedAt = this.now(); }
       this.schedule();
     }
     changed(revision, hasContent) {
       this.revision = revision; this.hasContent = hasContent;
-      this.dirty = hasContent; this.changedAt = this.now();
+      this.changedAt = this.now();
+      if (!hasContent) this.dirtySince = Infinity;
+      else if (!this.dirty) this.dirtySince = this.changedAt;
+      this.dirty = hasContent;
       this.schedule();
     }
     schedule() {
       if (this.timer !== null) this.cancelLater(this.timer);
       this.timer = null;
       if (!this.active || !this.visible || !this.enabled || !this.dirty || this.busy) return;
-      const due = Math.max(this.changedAt + this.debounceMs, this.lastStarted + this.intervalMs, this.retryAt);
+      // Prefer a short pause, but continuous pen movement must not starve Vision.
+      const progressAt = Math.min(this.changedAt + this.debounceMs, this.dirtySince + this.intervalMs);
+      const due = Math.max(progressAt, this.lastStarted + this.intervalMs, this.retryAt);
       this.timer = this.later(() => { this.timer = null; void this.run(); }, Math.max(0, due - this.now()));
     }
     async run() {
       if (!this.active || !this.visible || !this.enabled || !this.dirty || this.busy) return;
       const revision = this.revision, epoch = this.epoch;
       const controller = this.controller = new AbortController();
+      const isActive = () => !controller.signal.aborted && this.active && this.visible
+        && this.enabled && this.hasContent && epoch === this.epoch;
       const isCurrent = () => !controller.signal.aborted && this.current(revision, epoch);
-      this.busy = true; this.dirty = false;
+      this.busy = true; this.dirty = false; this.dirtySince = Infinity;
       try {
         const blob = await this.snapshot();
-        if (!blob || !isCurrent()) return;
+        // PNG encoding is asynchronous. New strokes may arrive meanwhile; a
+        // recent snapshot remains useful in the same open, authorized session.
+        if (!blob || !isActive()) return;
         const previousStart = this.lastStarted;
         this.lastStarted = this.now();
         this.onState("observing", revision, epoch);
-        const result = await this.observe(blob, revision, { signal: controller.signal, sessionId: epoch, isCurrent });
+        const result = await this.observe(blob, revision, { signal: controller.signal, sessionId: epoch, isCurrent, isActive });
         if (result?.deferred && !controller.signal.aborted && this.active && this.visible && this.enabled) {
           // A busy voice adapter has not started a Vision request. Retry the
           // newest drawing, retaining the interval from the last actual request.
           this.lastStarted = previousStart; this.dirty = this.hasContent;
+          if (!Number.isFinite(this.dirtySince)) this.dirtySince = this.now();
           this.retryAt = this.now() + 1000;
           if (isCurrent()) this.onState("waiting", revision, epoch);
           return;
@@ -197,12 +208,12 @@
       pause.setAttribute("aria-pressed", String(!observation.enabled));
       pause.textContent = observation.enabled ? "暂停观察" : "继续观察";
       status.textContent = !observation.enabled ? "已暂停，爸爸老师暂时不看画" :
-        !observation.visible ? "画板隐藏时暂停观察" : "画一画，停一停，爸爸老师会看";
+        !observation.visible ? "画板隐藏时暂停观察" : "你慢慢画，爸爸老师会看你的新笔画";
     }
     function changed() {
       revision++; feedback.textContent = "";
       observation.changed(revision, hasDrawing()); refreshTools();
-      if (observation.enabled) status.textContent = "你慢慢画，爸爸老师等你停一停";
+      if (observation.enabled) status.textContent = "你继续画，爸爸老师一会儿看看新笔画";
     }
     function paint(operation) {
       if (operation.clear) { context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height); return; }
@@ -294,6 +305,7 @@
     }
     async function getSnapshot() {
       if (!opened || doc.hidden || !initialized || !hasDrawing()) return null;
+      const snapshotSession = observation.epoch;
       const edge = Math.max(256, Math.min(1024, Number(maxSnapshotEdge) || 1024));
       const scale = Math.min(1, edge / Math.max(canvas.width, canvas.height));
       const snapshot = doc.createElement("canvas");
@@ -308,7 +320,9 @@
         if (pixels[index] < 250 || pixels[index + 1] < 250 || pixels[index + 2] < 250) { ink = true; break; }
       }
       if (!ink) return null;
-      return new Promise(resolve => snapshot.toBlob(resolve, "image/png"));
+      return new Promise(resolve => snapshot.toBlob(blob => {
+        resolve(opened && !doc.hidden && snapshotSession === observation.epoch ? blob : null);
+      }, "image/png"));
     }
     function open() {
       if (destroyed || opened) return api;

@@ -48,7 +48,7 @@ function observationFixture(observe, snapshot = async () => new Blob(["synthetic
   };
 }
 
-test("only settled nonblank drawing starts an observation; start times stay five seconds apart", async () => {
+test("a brief pause observes nonblank drawing; start times stay five seconds apart", async () => {
   const calls = [];
   const f = observationFixture(async (_, revision) => { calls.push({ revision, at: f.now() }); return "看到了"; });
   f.queue.setActive(true);
@@ -59,6 +59,44 @@ test("only settled nonblank drawing starts an observation; start times stay five
   f.queue.changed(3, true); await f.advance(4999); assert.equal(calls.length, 1);
   await f.advance(1); assert.deepEqual(calls[1], { revision: 3, at: 9100 });
   f.queue.changed(4, false); await f.advance(10000); assert.equal(calls.length, 2);
+});
+
+test("continuous drawing observes progress every five seconds instead of waiting forever for a pause", async () => {
+  const calls = [];
+  const f = observationFixture(async (_, revision) => { calls.push({ revision, at: f.now() }); return "看到了"; });
+  f.queue.setActive(true);
+  for (let revision = 1; revision <= 24; revision++) {
+    f.queue.changed(revision, true); await f.advance(500);
+  }
+  assert.deepEqual(calls, [{ revision: 10, at: 5000 }, { revision: 20, at: 10000 }]);
+  assert.equal(f.queue.busy, false);
+  f.queue.setActive(false);
+});
+
+test("new strokes during PNG encoding keep the same session snapshot usable without displaying stale feedback", async () => {
+  let finish; const calls = [];
+  const f = observationFixture(async (_, revision, meta) => {
+    calls.push({ revision, current: meta.isCurrent(), active: meta.isActive() }); return "older frame";
+  }, () => new Promise(resolve => { finish = resolve; }));
+  f.queue.setActive(true); f.queue.changed(1, true); await f.advance(1200);
+  f.queue.changed(2, true);
+  finish(new Blob(["synthetic-revision-1"])); await tick();
+  assert.deepEqual(calls, [{ revision: 1, current: false, active: true }]);
+  assert.deepEqual(f.results, []);
+  f.queue.setActive(false);
+});
+
+test("pausing a continuously changing drawing discards its old maximum wait deadline", async () => {
+  const calls = [];
+  const f = observationFixture(async (_, revision) => { calls.push({ revision, at: f.now() }); });
+  f.queue.setActive(true);
+  for (let revision = 1; revision <= 8; revision++) { f.queue.changed(revision, true); await f.advance(500); }
+  f.queue.setEnabled(false); await f.advance(10000);
+  assert.deepEqual(calls, []);
+  f.queue.setEnabled(true);
+  for (let revision = 9; revision <= 18; revision++) { f.queue.changed(revision, true); await f.advance(500); }
+  assert.deepEqual(calls, [{ revision: 18, at: 19000 }]);
+  f.queue.setActive(false);
 });
 
 test("busy work combines edits into the newest revision, without concurrency or interrupting current speech", async () => {
@@ -207,6 +245,19 @@ test("Escape restores focus and scrolling; feedback is rejected after close, pau
   assert.equal(f.doc.activeElement, f.initialFocus); assert.equal(f.board.setFeedback("关闭后迟到"), false);
   f.board.open(); assert.equal(f.board.setFeedback("上一轮迟到", f.board.revision, firstSession), false);
   f.board.destroy();
+});
+
+test("closing during PNG encoding cannot return a manual voice snapshot from the old board session", async () => {
+  const f=boardFixture();f.board.open();
+  try {
+    f.canvas.dispatch('pointerdown');f.canvas.dispatch('pointerup');
+    const create=f.doc.createElement;let finish;
+    f.doc.createElement=tag=>{const node=create(tag);if(tag==='canvas')node.toBlob=callback=>{finish=callback;};return node;};
+    const snapshot=f.board.getSnapshot();
+    f.board.close();f.board.open();
+    finish(new Blob(['old-session-drawing'],{type:'image/png'}));
+    assert.equal(await snapshot,null);
+  }finally{f.board.destroy();}
 });
 
 test("native fullscreen rejection keeps a usable overlay, and talk uses only the supplied callback", async () => {

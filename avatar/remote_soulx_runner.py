@@ -107,12 +107,23 @@ class _H264BatchEncoder:
                 return b""
             batch = self._pending[:batch_size]
             del self._pending[:batch_size]
-            payload = bytearray(self.MAGIC)
-            payload.extend(struct.pack(">B", len(batch)))
-            for is_key, timestamp_us, packet in batch:
-                payload.extend(struct.pack(">BQI", 1 if is_key else 0, timestamp_us, len(packet)))
-                payload.extend(packet)
-            return bytes(payload)
+            return self._pack_batch(batch)
+
+    def _pack_batch(self, batch) -> bytes:
+        if not batch:
+            return b""
+        payload = bytearray(self.MAGIC)
+        payload.extend(struct.pack(">B", len(batch)))
+        for is_key, timestamp_us, packet in batch:
+            payload.extend(struct.pack(">BQI", 1 if is_key else 0, timestamp_us, len(packet)))
+            payload.extend(packet)
+        return bytes(payload)
+
+    def drain_pending(self) -> bytes:
+        """Send already encoded tail packets without ending or resetting the codec."""
+        with self._lock:
+            batch, self._pending = self._pending, []
+            return self._pack_batch(batch)
 
     def reset(self) -> None:
         """Start every turn with SPS/PPS plus an immediately decodable keyframe."""
@@ -261,6 +272,7 @@ def _run_soulx_server(server_path: Path) -> None:
         self._family_streaming = False
         self._family_stream_ended = False
         self._family_h264_encoder = _H264BatchEncoder()
+        self._family_tail_emit_lock = threading.Lock()
         self._family_warm_ready = threading.Event()
         if os.getenv("SOULX_IDLE_MODE", "speech_only").strip().lower() == "speech_only":
             import numpy as np
@@ -276,9 +288,11 @@ def _run_soulx_server(server_path: Path) -> None:
         return payload
 
     def interruptible_flush(self):
-        self._family_streaming = False
-        self._family_stream_ended = False
-        original_flush(self)
+        with self._family_tail_emit_lock:
+            self._family_streaming = False
+            self._family_stream_ended = False
+            original_flush(self)
+        # Codec work stays outside the tail-send lock; no lock-order reversal.
         self._family_h264_encoder.reset()
 
     async def streaming_handler(self, ws):
@@ -340,6 +354,15 @@ def _run_soulx_server(server_path: Path) -> None:
                     break
                 self.on_frames(self._to_jpeg(frame))
                 next_t += frame_interval
+            else:
+                # A completed 24-frame group may leave fewer than five encoded
+                # frames. Serialize this small send with cancellation, not encoding.
+                with self._family_tail_emit_lock:
+                    if (sequence == self._flush_seq and not self._flushed.is_set()
+                            and not self._stop.is_set()):
+                        payload = self._family_h264_encoder.drain_pending()
+                        if payload:
+                            self.on_frames(payload)
 
     def emit_nonempty(self, payload: bytes) -> None:
         if payload:

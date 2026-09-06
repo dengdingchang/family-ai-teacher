@@ -95,3 +95,57 @@ test('streaming avatar has an explicit begin while legacy complete audio remains
   c.cueAvatar({ sequence: 1, avatar_pcm_base64: 'whole-utterance' });
   assert.deepEqual(events, ['flush', 'audio']);
 });
+
+for (const transition of [{action:'set',activity:'story',step:1}, {action:'clear',activity:'drawing',step:2}]) {
+  test(`completed drawing voice ${transition.action}/${transition.activity} closes the board only after playback and receipt`, async () => {
+    let closed=0, release;
+    const f=conversation({drawingBoard:{isOpen:true,close(){closed++;assert.ok(f.requests.at(-1).url.endsWith('/complete'));}},
+      waitForAudioQueue:()=>new Promise(resolve=>{release=resolve;}),
+      consumeSse:async(_response,emit)=>{emit({event:'audio'});emit({event:'done',assistant_text:'我们接着玩。',ok:true,commit_required:true,activity_transition:transition});}});
+    const result=f.c.sendStreamingRequest({endpoint:'/api/conversation/stream',body:new FormData(),source:'drawing-voice'});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(closed,0);release();
+    assert.equal((await result).ok,true);assert.equal(closed,1);
+    assert.ok(f.calls.includes('listen'));
+  });
+}
+
+test('failed playback receipt preserves the drawing board and its pixels', async()=>{
+  let closed=0;
+  const f=conversation({drawingBoard:{isOpen:true,close(){closed++;}},
+    fetch:async url=>({ok:!url.endsWith('/complete'),json:async()=>({ok:!url.endsWith('/complete'),detail:'synthetic receipt failure'})}),
+    consumeSse:async(_response,emit)=>emit({event:'done',assistant_text:'休息一下。',ok:true,commit_required:true,activity_transition:{action:'clear',activity:'drawing'}})});
+  assert.equal((await f.c.sendStreamingRequest({endpoint:'/api/conversation/stream',body:new FormData(),source:'drawing-voice'})).ok,false);
+  assert.equal(closed,0);
+});
+
+test('continuing drawing and automatic observations cannot close the board',async()=>{
+  let closed=0;
+  const f=conversation({drawingBoard:{isOpen:true,close(){closed++;}},
+    consumeSse:async(_response,emit)=>emit({event:'done',assistant_text:'再添一笔。',ok:true,commit_required:true,activity_transition:{action:'set',activity:'drawing',step:3}})});
+  assert.equal((await f.c.sendStreamingRequest({endpoint:'/api/conversation/stream',body:new FormData(),source:'drawing-voice'})).ok,true);
+  f.c.consumeSse=async(_response,emit)=>emit({event:'done',assistant_text:'一条蓝线。',ok:true,commit_required:false,activity_transition:{action:'clear',activity:'drawing'}});
+  assert.equal((await f.c.sendStreamingRequest({endpoint:'/api/conversation/stream',body:new FormData(),source:'drawing-observation'})).ok,true);
+  assert.equal(closed,0);
+});
+
+for (const cancellation of ['pause', 'playback-replaced', 'request-replaced']) {
+  test(`late successful receipt cannot close the board after ${cancellation}`, async () => {
+    let closed = 0, releaseReceipt;
+    const f = conversation({ drawingBoard: { isOpen: true, close() { closed++; } },
+      fetch: async url => ({ ok: true, json: async () => url.endsWith('/complete')
+        ? new Promise(resolve => { releaseReceipt = resolve; }) : { ok: true } }),
+      consumeSse: async (_response, emit) => emit({ event: 'done', assistant_text: '来听故事。', ok: true,
+        commit_required: true, activity_transition: { action: 'set', activity: 'story', step: 1 } }) });
+    const pending = f.c.sendStreamingRequest({ endpoint: '/api/conversation/stream', body: new FormData(), source: 'drawing-voice' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(typeof releaseReceipt, 'function');
+    if (cancellation === 'pause') { f.c.conversationActive = false; f.c.activeRequestController.abort(); }
+    if (cancellation === 'playback-replaced') f.c.queueGeneration++;
+    if (cancellation === 'request-replaced') f.c.activeRequestController = new AbortController();
+    releaseReceipt({ ok: true });
+    assert.equal((await pending).ok, false);
+    assert.equal(closed, 0);
+    assert.equal(f.calls.includes('listen'), false);
+  });
+}

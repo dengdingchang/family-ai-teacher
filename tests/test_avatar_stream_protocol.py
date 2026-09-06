@@ -49,6 +49,7 @@ def engine(items, *, streaming=True):
     return SimpleNamespace(
         chunk_samples=15360, audio_q=TimedQueue(items),
         _flushed=threading.Event(), _stop=threading.Event(),
+        _family_tail_emit_lock=threading.Lock(),
         _family_streaming=streaming, _family_stream_ended=False,
     )
 
