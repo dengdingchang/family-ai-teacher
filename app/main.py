@@ -1230,7 +1230,14 @@ def _continue_activity_reply(
                 return advance("红色和蓝色不一样！蓝色叫 Blue，红色叫 Red，哪个词表示蓝色？", 4)
             return keep("我们比较想象中的红积木和蓝积木。颜色一样，还是不一样？")
         if step == 4:
-            if said_word("Blue"):
+            # This is a meaning/choice question, not the English sentence drill.
+            # Match the whole answer so mentions, questions and alternatives do not pass.
+            if (not needs_help and not re.search(r"[?？]|呢", topic)
+                    and (said_word("Blue") or re.fullmatch(
+                        r"(?:我(?:选|選)(?:择|擇)?blue|(?:蓝色|藍色)(?:叫|是|的英文是)blue|"
+                        r"blue(?:是|表示)(?:蓝色|藍色))(?:呀|啊|啦)?",
+                        compact_answer,
+                    ))):
                 return finish("Blue 是蓝色！去和家人找两种不同颜色的物品吧。")
             return keep("蓝色叫 Blue，红色叫 Red。哪个词表示蓝色？")
         if step == 1:

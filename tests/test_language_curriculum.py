@@ -1,5 +1,8 @@
 """Parent-reviewed English/color progression; no model or real family data."""
 
+import asyncio
+import threading
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -89,6 +92,67 @@ def test_advanced_questions_reject_old_answers_negation_and_resume_cues(store, a
         assert transition["activity"] == activity and transition["step"] == step
         assert "掌握" not in reply
         assert store.get_activity_state()["step"] == step
+
+
+@pytest.mark.parametrize("answer", [
+    "我选 Blue", "蓝色叫 Blue", "Blue 是蓝色", "蓝色的英文是 Blue",
+])
+def test_clear_color_answers_finish_only_after_playback_without_awarding_mastery(store, answer):
+    expected = parent_mastered(store, "english.colors")
+    store.apply_activity_transition({"action": "set", "activity": "colors", "step": 4})
+    reply, transition = main._activity_turn_reply(answer, PROFILE)
+    assert transition["action"] == "clear"
+    assert "Blue 是蓝色" in reply
+    assert store.get_activity_state()["step"] == 4
+    assert store.get_history() == []
+    turn_id = uuid.uuid4().hex
+    main._register_stream_turn(turn_id, threading.Event())
+    try:
+        assert main._stage_stream_turn(turn_id, answer, reply, activity_transition=transition)
+        assert store.get_activity_state()["step"] == 4
+        assert store.get_history() == []
+        result = asyncio.run(main.complete_streaming_turn(turn_id))
+        assert result["ok"]
+        assert store.get_activity_state()["status"] == "idle"
+        assert len(store.get_history()) == 1
+        actual = next(item for item in store.get_skill_graph()["skills"] if item["id"] == "english.colors")
+        assert {field: actual[field] for field in ASSESSMENT_FIELDS} == {
+            field: expected[field] for field in ASSESSMENT_FIELDS
+        }
+    finally:
+        with main._stream_turn_lock:
+            main._stream_turns.pop(turn_id, None)
+
+
+@pytest.mark.parametrize("answers", [
+    ["不是 Blue", "我不知道 Blue", "Red 不是 Blue"],
+    ["可能是 Blue", "我猜 Blue", "不知道"],
+    ["Blue？", "Blue 呢", "蓝色叫 Blue 吗？"],
+    ["老师说 Blue", "“Blue 是蓝色”"],
+    ["红色叫 Blue", "Blue 是红色", "蓝色的英文是 Red"],
+    ["我选 Blue 或 Red", "Blue 是蓝色，Red 也是蓝色"],
+    ["我喜欢蓝色，blue", "我喜欢蓝色不露"],
+])
+def test_color_choice_rejects_uncertain_quoted_wrong_and_conflicting_answers(store, answers):
+    store.apply_activity_transition({"action": "set", "activity": "colors", "step": 4})
+    for answer in answers:
+        reply, transition = main._activity_turn_reply(answer, PROFILE)
+        assert transition["action"] == "set"
+        assert transition["activity"] == "colors" and transition["step"] == 4
+        assert "哪个词表示蓝色" in reply
+        assert store.get_activity_state()["step"] == 4
+    assert store.get_history() == []
+
+
+def test_natural_color_choices_do_not_relax_the_english_sentence_lesson(store):
+    store.apply_activity_transition({"action": "set", "activity": "english", "step": 4})
+    for answer in ("我选 Blue", "蓝色叫 Blue", "Blue 是蓝色", "蓝色的英文是 Blue", "Blue"):
+        reply, transition = main._activity_turn_reply(answer, PROFILE)
+        assert transition["action"] == "set" and transition["step"] == 4
+        assert "I like blue" in reply
+    _, transition = main._activity_turn_reply("I like blue", PROFILE)
+    assert transition["action"] == "clear"
+    assert store.get_activity_state()["step"] == 4
 
 
 @pytest.mark.parametrize("skill_id,start_text,review,expected", [
