@@ -68,6 +68,7 @@ test('flush cancels the old pump so a new keyframe decodes immediately without r
   const context = vm.createContext({
     avatarFrameGeneration: 1, avatarAcceptFrames: true,
     avatarEncodedQueue: [], avatarNeedsKeyframe: true, avatarPumpTimer: null,
+    avatarAwaitingStreamStart: false,
     avatarCanvas: { getContext: () => ({ drawImage(frame) { drawn.push(frame.timestamp); } }) },
     avatarImage: {}, syncAvatarIdle() {}, markAvatarFrame() {}, sendAvatarEvent() {},
     ensureAvatarDecoder: () => true,

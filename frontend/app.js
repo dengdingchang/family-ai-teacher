@@ -50,6 +50,7 @@ let avatarEncodedQueue = [];
 let avatarPumpTimer = null;
 let avatarNeedsKeyframe = true;
 let avatarAcceptFrames = false;
+let avatarAwaitingStreamStart = false;
 let avatarFrameGeneration = 0;
 let avatarAudioLeadMs = 900;
 let avatarFrameSerial = 0;
@@ -463,6 +464,12 @@ function pumpAvatarVideo() {
 
 function queueEncodedAvatarFrame(frame) {
   if (!avatarAcceptFrames) return;
+  // Streaming flush resets the remote encoder to timestamp zero. A periodic
+  // keyframe still in transit belongs to the previous reply, not this one.
+  if (avatarAwaitingStreamStart) {
+    if (!frame.key || frame.timestamp !== 0) return;
+    avatarAwaitingStreamStart = false;
+  }
   avatarEncodedQueue.push(frame);
   if (avatarEncodedQueue.length > 50) {
     const latestKeyframe = avatarEncodedQueue.findLastIndex((item) => item.key);
@@ -576,6 +583,7 @@ function sendAvatarEvent(payload) {
 function flushAvatar() {
   avatarFrameGeneration++;
   avatarAcceptFrames = false;
+  avatarAwaitingStreamStart = false;
   avatarEncodedQueue = [];
   avatarNeedsKeyframe = true;
   if (avatarPumpTimer) clearTimeout(avatarPumpTimer);
@@ -603,6 +611,7 @@ function cueAvatar(payload) {
   if (isFirstChunk) flushAvatar();
   avatarAcceptFrames = true;
   if (isFirstChunk && payload.audio_stream && avatarSocket.supportsAudioStream) {
+    avatarAwaitingStreamStart = true;
     sendAvatarEvent({ type: "audio_begin" });
   }
   const sent = sendAvatarEvent({ type: "audio", pcm: payload.avatar_pcm_base64 });
