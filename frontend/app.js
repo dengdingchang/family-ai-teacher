@@ -528,6 +528,7 @@ function connectAvatar() {
       const payload = JSON.parse(String(event.data));
       if (payload.type === "ready") {
         avatarReady = true;
+        socket.supportsAudioStream = payload.audio_stream_protocol === true;
         avatarReconnectDelayMs = 1200;
         setAvatarState("准备好啦，可以一起说话");
       } else if (payload.type === "error") {
@@ -601,6 +602,9 @@ function cueAvatar(payload) {
   const isFirstChunk = Number(payload.sequence || 1) === 1;
   if (isFirstChunk) flushAvatar();
   avatarAcceptFrames = true;
+  if (isFirstChunk && payload.audio_stream && avatarSocket.supportsAudioStream) {
+    sendAvatarEvent({ type: "audio_begin" });
+  }
   const sent = sendAvatarEvent({ type: "audio", pcm: payload.avatar_pcm_base64 });
   if (!sent) avatarAcceptFrames = false;
   return sent && isFirstChunk ? avatarAudioLeadMs : 0;
@@ -878,7 +882,17 @@ function enqueueStreamingAudio(payload) {
         }));
       },
     });
-    session.finishInput = beginSync;
+    const streamSocket = avatarSocket;
+    let inputFinished = false;
+    session.finishInput = () => {
+      if (!inputFinished && session.avatarEnabled && streamSocket === avatarSocket
+          && streamSocket?.supportsAudioStream && generation === queueGeneration
+          && !session.player.cancelled && session.sequence > 0) {
+        sendAvatarEvent({ type: "audio_end" });
+      }
+      inputFinished = true;
+      beginSync();
+    };
     streamingPlayback = session;
     if (!session.avatarEnabled) beginSync();
   }

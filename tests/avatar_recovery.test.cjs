@@ -96,6 +96,22 @@ function playbackSetup() {
   };
 }
 
+test('negotiated streaming keeps one begin/end around all PCM and does not end a cancelled generation', () => {
+  const f = playbackSetup();
+  f.c.avatarSocket.supportsAudioStream = true;
+  f.chunk(1);
+  f.chunk(2);
+  f.c.streamingPlayback.finishInput();
+  f.c.streamingPlayback.finishInput();
+  assert.deepEqual(f.events, ['flush', 'audio_begin', 'audio', 'audio', 'audio_end']);
+  const cancelled = playbackSetup();
+  cancelled.c.avatarSocket.supportsAudioStream = true;
+  cancelled.chunk(1);
+  cancelled.c.queueGeneration++;
+  cancelled.c.streamingPlayback.finishInput();
+  assert.equal(cancelled.events.includes('audio_end'), false);
+});
+
 test('first-frame timeout starts speech, keeps later PCM flowing, and recovers visible motion until cancellation', async () => {
   const f = playbackSetup();
   f.chunk(1);

@@ -159,6 +159,41 @@ def controls(writes):
             if isinstance(value, str) and json.loads(value).get("type") != "ping"]
 
 
+def test_stream_begin_follows_takeover_flush_and_old_end_cannot_finish_new_audio():
+    async def run():
+        async with connections() as (old, new, writes):
+            begin = json.dumps({"type": "audio_begin"})
+            end = json.dumps({"type": "audio_end"})
+            await old.send(begin)
+            await old.barrier()
+            assert controls(writes) == []
+            await old.send(AUDIO)
+            await old.barrier()
+            assert controls(writes) == [("old", "flush"), ("old", "audio_begin"), ("old", "audio")]
+            await new.send(begin)
+            await new.send(AUDIO)
+            await new.barrier()
+            writes.clear()
+            await old.send(end)
+            await old.barrier()
+            assert controls(writes) == []
+            await new.send(end)
+            await new.barrier()
+            assert controls(writes) == [("new", "audio_end")]
+    asyncio.run(run())
+
+
+def test_cancelled_pending_begin_does_not_change_legacy_audio():
+    async def run():
+        async with connections() as (old, _, writes):
+            await old.send(json.dumps({"type": "audio_begin"}))
+            await old.send(FLUSH)
+            await old.send(AUDIO)
+            await old.barrier()
+            assert controls(writes) == [("old", "flush"), ("old", "audio")]
+    asyncio.run(run())
+
+
 def test_idle_or_old_page_flush_cannot_clear_the_latest_pcm_owner():
     async def run():
         async with connections() as (old, new, writes):
