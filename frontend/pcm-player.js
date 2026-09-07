@@ -20,6 +20,7 @@
       this.decodeTail = Promise.resolve();
       this.pendingDecodes = 0;
       this.nextStart = 0;
+      this.timeline = [];
       this.gateOpen = false;
       this.cancelled = false;
       this.error = null;
@@ -92,6 +93,7 @@
             this.settle();
           };
           source.start(start);
+          this.timeline.push({ start, duration: buffer.duration, offset: this.stats.seconds });
           if (this.stats.firstStart === null) this.stats.firstStart = start;
           this.stats.segments += 1;
           this.stats.seconds += buffer.duration;
@@ -105,6 +107,19 @@
       } catch (error) {
         this.fail(error);
       }
+    }
+
+    playbackPositionSeconds() {
+      if (this.cancelled || this.error || !this.timeline.length || !this.sources.size) return null;
+      const output = this.context.getOutputTimestamp?.();
+      const now = output?.contextTime > 0 ? output.contextTime : this.context.currentTime;
+      for (let index = this.timeline.length - 1; index >= 0; index--) {
+        const segment = this.timeline[index];
+        if (now >= segment.start) {
+          return segment.offset + Math.min(segment.duration, now - segment.start);
+        }
+      }
+      return 0;
     }
 
     drain() {

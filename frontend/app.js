@@ -1,4 +1,4 @@
-import "/pcm-player.js?v=20260906-stream1";
+import "/pcm-player.js?v=20260907-playback-clock";
 import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
 import "/drawing-board.js?v=20260906-3";
@@ -444,6 +444,16 @@ function ensureAvatarDecoder() {
 function pumpAvatarVideo() {
   avatarPumpTimer = null;
   if (!avatarEncodedQueue.length || !ensureAvatarDecoder()) return;
+  const session = typeof streamingPlayback !== "undefined" ? streamingPlayback : null;
+  const position = session?.generation === (typeof queueGeneration !== "undefined" ? queueGeneration : -1)
+    ? session.player.playbackPositionSeconds?.() : null;
+  const clocked = Number.isFinite(position);
+  // Do not add another real-time queue behind a network burst. Decode late
+  // dependencies promptly, but hold frames that would run ahead of the voice.
+  if (clocked && avatarEncodedQueue[0].timestamp / 1000000 > position + 0.04) {
+    avatarPumpTimer = setTimeout(pumpAvatarVideo, 20);
+    return;
+  }
   const next = avatarEncodedQueue.shift();
   if (avatarNeedsKeyframe && !next.key) {
     avatarPumpTimer = setTimeout(pumpAvatarVideo, 0);
@@ -459,7 +469,7 @@ function pumpAvatarVideo() {
   } catch (_) {
     avatarNeedsKeyframe = true;
   }
-  avatarPumpTimer = setTimeout(pumpAvatarVideo, 40);
+  avatarPumpTimer = setTimeout(pumpAvatarVideo, clocked ? 0 : 40);
 }
 
 function queueEncodedAvatarFrame(frame) {

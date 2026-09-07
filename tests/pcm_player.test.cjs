@@ -49,6 +49,26 @@ class FakeContext {
   }
 }
 
+test('playback position follows output time and excludes underrun silence', async () => {
+  const context = new FakeContext();
+  const player = new StreamingPcmPlayer(context);
+  assert.equal(player.playbackPositionSeconds(), null);
+  player.enqueue(bytes(0));
+  await tick();
+  context.currentTime = 10.34;
+  assert.ok(Math.abs(player.playbackPositionSeconds() - 0.32) < 1e-9);
+  context.currentTime = 12;
+  assert.equal(player.playbackPositionSeconds(), 0.64);
+  player.enqueue(bytes(1));
+  await tick();
+  context.currentTime = 12.34;
+  assert.ok(Math.abs(player.playbackPositionSeconds() - 0.96) < 1e-9);
+  context.getOutputTimestamp = () => ({contextTime: 12.12});
+  assert.ok(Math.abs(player.playbackPositionSeconds() - 0.74) < 1e-9);
+  player.cancel();
+  assert.equal(player.playbackPositionSeconds(), null);
+});
+
 test("irregular WAV durations are scheduled contiguously before any ended event", async () => {
   const context = new FakeContext();
   const events = [];
