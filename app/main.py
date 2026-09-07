@@ -18,6 +18,7 @@ import time
 import unicodedata
 import uuid
 import wave
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +27,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from avatar.control import StreamingAvatarControl
+from app.repetition import RepeatedQuestionGuard
 from camera.adapter import BrowserCameraAdapter, CameraAdapterError
 from llm.client import LLMError, LLMNotConfiguredError, OpenAICompatibleClient
 from memory.store import DEFAULT_ENABLED_ACTIVITIES, MemoryStore
@@ -255,7 +258,10 @@ def _system_prompt(
     profile_json = json.dumps(profile, ensure_ascii=False)
     events_json = json.dumps(learning_events[-4:], ensure_ascii=False)
     memories_json = json.dumps(
-        [item.get("summary", "") for item in durable_memories[-6:]],
+        [{"summary": item.get("summary", ""), "source": item.get("source", "unknown"),
+          "recorded_at": item.get("created_at"), "last_mentioned_at": item.get("last_seen_at"),
+          "corrected_at": item.get("updated_at")}
+         for item in durable_memories[-6:]],
         ensure_ascii=False,
     )
     active_skills = [
@@ -299,6 +305,10 @@ def _system_prompt(
         "如果孩子提到受伤、危险、走失或害怕，先让他马上找身边可信任的大人，不要独自处理。\n"
         f"孩子资料：{profile_json}\n"
         f"确认过的长期记忆（只有这些可以当作确定事实）：{memories_json}\n"
+        f"当前本地时间：{datetime.now().astimezone().isoformat(timespec='seconds')}。"
+        "记忆中的recorded_at是记录时间，last_mentioned_at是最近提及时间，corrected_at是修改时间，"
+        "都不自动等于事件发生时间。旧记忆里的‘今天/昨天’不能直接当成当前这一天；"
+        "只有原始记录明确支持时才回答事件日期，否则说明只知道何时记录、具体发生日期还不确定。\n"
         f"当前学习状态：{skills_json}\n"
         f"课程引擎建议（孩子换主题时可以灵活调整）：{activity_json}\n"
         f"最近学习事件（仅作短期文字上下文）：{events_json}"
@@ -1742,6 +1752,16 @@ def _ensure_guided_reply(
     """Prevent shallow acknowledgements and keep every turn moving forward."""
 
     clean = _compact_assistant_text(assistant_text)
+    # A specific request to repeat uncertain speech is useful interaction, even
+    # when its first sentence is a question. Do not turn it into "I heard you".
+    asks_to_rephrase = re.search(r"(?:再|重新)(?:说|讲)(?:一遍|一次)|换(?:一)?个说法", clean)
+    uncertain_reference = re.search(
+        r"没(?:有)?听(?:清|明白|懂)|听不(?:清|明白|懂)|"
+        r"你(?:刚才)?想说(?:的)?(?:哪个|什么)|刚才(?:的|那)(?:话|句|词)|"
+        r"(?:刚才|这句|这句话).{0,16}(?:是什么意思|什么意思|没明白)", clean,
+    )
+    if asks_to_rephrase and uncertain_reference:
+        return clean
     plain = re.sub(r"[\s。！？!?，,、：:；;“”'\"]", "", clean).casefold()
     shallow_phrases = {
         "好",
@@ -2119,7 +2139,8 @@ async def _answer_text(text: str, stt_result: Any | None = None) -> dict[str, An
                         messages = narration_messages(messages, story_fallback, activity_transition)
                     llm_result = await asyncio.to_thread(llm.chat, messages, 180 if story_fallback else 72)
                     assistant_text = (clean_narration(llm_result.text, story_fallback) if story_fallback
-                                      else _ensure_guided_reply(clean_text, llm_result.text, profile))
+                                      else RepeatedQuestionGuard(messages).replacement(llm_result.text)
+                                      or _ensure_guided_reply(clean_text, llm_result.text, profile))
                     llm_elapsed_s = llm_result.elapsed_s
                 except (LLMNotConfiguredError, LLMError) as exc:
                     logger.warning("AI Station reply failed; continuing with local child-safe turn: %s", exc)
@@ -2227,6 +2248,7 @@ async def _stream_conversation(
         queued_prefix = ""
         story_fallback = ""
         chess_context_for_reply = chess_context
+        repetition_guard = RepeatedQuestionGuard([])
         try:
             local_lesson = (_observed_scene_reply(vision_context, profile, visual_source="drawing", drawing_observation=True)
                             if drawing_observation else _child_priority_reply(clean_text))
@@ -2293,6 +2315,8 @@ async def _stream_conversation(
                                      chess_context_for_reply if chess_context else "")
             if story_fallback:
                 messages = narration_messages(messages, story_fallback, state["activity_transition"])
+            elif not chess_context_for_reply:
+                repetition_guard = RepeatedQuestionGuard(messages)
             response_stream = llm.stream_chat(messages, max_tokens=180 if story_fallback else 72)
             state["response_stream"] = response_stream
             for delta in response_stream:
@@ -2301,7 +2325,7 @@ async def _stream_conversation(
                 delta_text = str(delta)
                 response_buffer += delta_text
                 events.put({"event": "assistant_delta", "text": delta_text})
-                if not queued_prefix and not story_fallback and not chess_context_for_reply:
+                if not queued_prefix and not story_fallback and not chess_context_for_reply and not repetition_guard.repeated:
                     queued_prefix = _early_spoken_chunk(response_buffer)
                     if queued_prefix:
                         queue_response_text(queued_prefix)
@@ -2312,7 +2336,8 @@ async def _stream_conversation(
                 return
             assistant_text = (clean_narration(response_buffer, story_fallback) if story_fallback
                               else _compact_assistant_text(response_buffer, max_chars=90) if chess_context_for_reply
-                              else _ensure_guided_reply(clean_text, response_buffer, profile))
+                              else repetition_guard.replacement(response_buffer)
+                              or _ensure_guided_reply(clean_text, response_buffer, profile))
             if not assistant_text:
                 raise LLMError("AI Station returned empty assistant text")
             if queued_prefix and not assistant_text.startswith(queued_prefix):
@@ -2334,7 +2359,7 @@ async def _stream_conversation(
             assistant_text = (
                 story_fallback if story_fallback else
                 "刚才这句没能讲清。先点一枚白棋，看看亮起的格子，也可以点“给我提示”。" if chess_context_for_reply else
-                _ensure_guided_reply(clean_text, response_buffer, profile)
+                (repetition_guard.replacement(response_buffer) or _ensure_guided_reply(clean_text, response_buffer, profile))
                 if response_buffer.strip()
                 else ("刚才这句没能讲清。先点一枚白棋，看看亮起的格子，也可以点“给我提示”。"
                       if chess_context else _offline_safe_reply(clean_text, profile))
@@ -3284,12 +3309,18 @@ async def avatar_idle() -> FileResponse:
     return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
 
+_avatar_control = StreamingAvatarControl()
+
+
 @app.websocket("/ws/avatar")
 async def avatar_websocket(websocket: WebSocket) -> None:
     """Same-origin proxy to the loopback-only SoulX WebSocket tunnel."""
 
     await websocket.accept()
     upstream_connected = False
+    # Only browser-fed PCM has the same control and viewing connection. Legacy
+    # remote TTS cues use a separate connection and retain the original proxy.
+    streaming_control = settings.tts_mode == "streaming"
     if not settings.avatar_ws_url:
         await websocket.send_json({"type": "error", "message": "avatar is not configured"})
         await websocket.close(code=1013)
@@ -3312,9 +3343,15 @@ async def avatar_websocket(websocket: WebSocket) -> None:
                     if message.get("type") == "websocket.disconnect":
                         return
                     if message.get("text") is not None:
-                        await upstream.send(str(message["text"]))
+                        payload = str(message["text"])
                     elif message.get("bytes") is not None:
-                        await upstream.send(bytes(message["bytes"]))
+                        payload = bytes(message["bytes"])
+                    else:
+                        continue
+                    if streaming_control:
+                        await _avatar_control.forward(websocket, upstream.send, payload)
+                    else:
+                        await upstream.send(payload)
 
             async def avatar_to_browser() -> None:
                 async for message in upstream:
@@ -3327,10 +3364,13 @@ async def avatar_websocket(websocket: WebSocket) -> None:
                 asyncio.create_task(browser_to_avatar()),
                 asyncio.create_task(avatar_to_browser()),
             }
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
+            try:
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
             for task in done:
                 task.result()
     except WebSocketDisconnect:
@@ -3343,6 +3383,8 @@ async def avatar_websocket(websocket: WebSocket) -> None:
         except Exception:
             pass
     finally:
+        if streaming_control:
+            await _avatar_control.release(websocket)
         if upstream_connected:
             app.state.avatar_connected_clients = max(
                 0,

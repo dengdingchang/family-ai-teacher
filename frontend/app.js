@@ -1576,6 +1576,9 @@ async function speakChessInstruction(text) {
   if (conversationActive && segmentRecording && (speechStartedAt || loudSince)) {
     return { ok: false, error: "我先听你说。想听棋盘讲解时，可以点“再听一遍”。" };
   }
+  if (activeRequestController) {
+    return { ok: false, error: "我先回答你刚才的问题。想听棋盘讲解，可以稍后点“再听一遍”。" };
+  }
   if (conversationStarting) return { ok: false, error: "麦克风还在准备，可以先下棋，稍后再听讲解。" };
   if (!instruction || instruction.length > 200) {
     cancelChessExplanation(true);
@@ -1600,7 +1603,6 @@ async function speakChessInstruction(text) {
   };
   controller.signal.addEventListener("abort", releasePlayback, { once: true });
   try {
-    await interruptActiveReply();
     if (!current()) return { ok: false, aborted: true };
     // Discard only the unfinished capture; keep the already-open microphone.
     stopVadLoop();
@@ -1674,6 +1676,11 @@ async function openChessActivity() {
         import("/chess-board.js?v=20260906-1"),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("chess module timeout")), 5000); }),
       ]);
+    }
+    if (generation !== chessOpenGeneration || !activityEnabled("game")) return;
+    if (!conversationActive) {
+      try { await startContinuousConversation(); }
+      catch (_) { recordHint.textContent = "麦克风暂时没打开，棋盘仍然可以玩；也可以请家长帮忙打开麦克风。"; }
     }
     if (generation !== chessOpenGeneration || !activityEnabled("game")) return;
     drawingBoard?.close();

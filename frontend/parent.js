@@ -13,6 +13,29 @@ const statusLabels = {
   durable: "长期保留",
 };
 
+const memoryCategoryLabels = {
+  parent: "家长记录",
+  episodic: "成长里程碑",
+  interest: "兴趣偏好",
+  learning: "学习记录",
+  profile: "孩子资料",
+};
+
+function memoryCategorySelect(current) {
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "记忆分类");
+  const categories = { ...memoryCategoryLabels };
+  if (current && !Object.hasOwn(categories, current)) categories[current] = "保留原有分类";
+  for (const [value, label] of Object.entries(categories)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = value === current;
+    select.append(option);
+  }
+  return select;
+}
+
 const defaultActivities = [
   "drawing",
   "story",
@@ -390,6 +413,7 @@ function renderMemoryPage() {
       input.maxLength = 240;
       input.required = true;
       input.setAttribute("aria-label", "纠正记忆内容");
+      const category = memoryCategorySelect(memory.category);
       const controls = document.createElement("div");
       controls.className = "item-actions";
       const cancel = document.createElement("button");
@@ -405,15 +429,17 @@ function renderMemoryPage() {
       save.className = "primary-button";
       save.textContent = "保存纠正";
       controls.append(cancel, save);
-      form.append(input, controls);
+      form.append(input, category, controls);
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!input.value.trim()) return;
         save.disabled = true;
         try {
+          const updates = { summary: input.value.trim() };
+          if (category.value !== memory.category) updates.category = category.value;
           await api(`/api/memories/${encodeURIComponent(memory.id)}`, {
             method: "PATCH",
-            body: JSON.stringify({ summary: input.value.trim() }),
+            body: JSON.stringify(updates),
           });
           showStatus("memorySaveStatus", "记忆已纠正，之后会使用新的内容。");
           await loadDashboard();
@@ -457,6 +483,7 @@ function renderMemoryPage() {
       memory.status,
       memory.last_seen_at || memory.created_at,
     );
+    if (memoryCategoryLabels[memory.category]) meta.append(` · ${memoryCategoryLabels[memory.category]}`);
     item.append(top, meta);
     root.append(item);
   }
@@ -607,7 +634,7 @@ function renderJournalPage() {
           && ["correct", "incorrect"].includes(value.last_result))
         .map((value) => `数字练习记录：${value.question} · 答对 ${value.correct || 0} 次、再试 ${value.incorrect || 0} 次 · 最近一次${value.last_result === "correct" ? "答对" : "需要再试"}；单题结果不代表独立掌握。`),
       ...(entry.skill_reviews || []).map(formatSkillReview),
-      ...(entry.milestones || []).map((value) => `已确认的第一次：${value}`),
+      ...(entry.milestones || []).map((value) => `已确认的成长记录：${value}`),
       ...(entry.milestone_candidates || []).map(
         (value) => `待爸爸确认：${value}`,
       ),
@@ -769,7 +796,7 @@ byId("memoryForm").addEventListener("submit", async (event) => {
       body: JSON.stringify({
         summary: input.value,
         status: "durable",
-        category: "parent",
+        category: byId("memoryCategory").value,
       }),
     });
     input.value = "";

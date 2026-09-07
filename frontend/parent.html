@@ -130,16 +130,26 @@
             <p class="panel-note">
               普通聊天留在历史里；只有有长期价值的内容才进入候选，最终由爸爸保留或删除。
             </p>
-            <form id="memoryForm" class="inline-form">
-              <input
-                aria-label="添加长期记忆"
-                id="memoryInput"
-                maxlength="240"
-                placeholder="手动添加一条值得长期记住的事"
-                required
-              />
+            <form id="memoryForm" class="stack-form">
+              <div class="field-grid">
+                <label><span>记下这件事</span><input
+                  aria-label="添加长期记忆"
+                  id="memoryInput"
+                  maxlength="240"
+                  placeholder="手动添加一条值得长期记住的事"
+                  required
+                /></label>
+                <label><span>记忆分类</span><select id="memoryCategory" aria-label="记忆分类">
+                  <option value="parent">家长记录</option>
+                  <option value="episodic">成长里程碑</option>
+                  <option value="interest">兴趣偏好</option>
+                  <option value="learning">学习记录</option>
+                  <option value="profile">孩子资料</option>
+                </select></label>
+              </div>
               <button class="primary-button" type="submit">加入长期记忆</button>
             </form>
+            <p class="panel-note">选择“成长里程碑”，会按这条记忆的记录日期展示在成长周记中。</p>
             <p id="memorySaveStatus" class="save-status" role="status"></p>
             <div class="memory-tools">
               <label
@@ -399,6 +409,6 @@
         结构化成长信息保存在家庭电脑；导出中不包含原始录音、照片或视频。
       </p>
     </main>
-    <script src="/parent.js?v=20260906-questions" defer></script>
+    <script src="/parent.js?v=20260906-memory-categories" defer></script>
   </body>
 </html>

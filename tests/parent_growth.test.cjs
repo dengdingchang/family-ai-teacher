@@ -55,6 +55,13 @@ function skill(reviewed = false) {
     practice_count: 3, parent_reviewed_at: reviewed ? '2026-09-06T00:00:00Z' : '' };
 }
 
+test('a parent-classified episodic memory is a confirmed record without inventing a first occurrence', () => {
+  const { context, facts } = setup();
+  context.renderJournal([{ week: '2026-W36', milestones: ['今天独立画了一架飞机'] }]);
+  assert.match(facts(), /已确认的成长记录：今天独立画了一架飞机/);
+  assert.doesNotMatch(facts(), /第一次/);
+});
+
 test('automatic exposure and parent practice stay distinct across successful and failed saves', async () => {
   const { context, apiState, select, practicingLabel } = setup();
   const automatic = skill();

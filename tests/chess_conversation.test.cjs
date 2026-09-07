@@ -129,6 +129,8 @@ test('voice failure remains retryable without microphone permission or family re
 
 test('opening chess is independent of microphone permission and closes drawing first', async () => {
   const f = fixture({ conversationActive: false, chessBoard: null });
+  let permissionAttempts = 0;
+  f.c.startContinuousConversation = async () => { permissionAttempts++; throw new Error('microphone denied'); };
   let closed = false;
   f.c.drawingBoard = { close() { closed = true; } };
   f.c.ChessBoard = class {
@@ -139,6 +141,7 @@ test('opening chess is independent of microphone permission and closes drawing f
   assert.equal(f.c.chessBoard.isOpen, true);
   assert.equal(f.requests.length, 0);
   assert.equal(f.c.conversationActive, false);
+  assert.equal(permissionAttempts, 1);
   f.c.activityEnabled = () => false; f.c.chessBoard = null;
   await f.c.openChessActivity(); assert.equal(f.c.chessBoard, null);
 });
@@ -159,19 +162,78 @@ test('a missing optional chess module is a caught local error, not an applicatio
   assert.equal(f.requests.length, 0);
 });
 
-test('closing chess while the old conversation cancels restores listening only after its controller is released', async () => {
+test('automatic chess explanations cannot cancel an in-flight child STT, model, or playback request', async () => {
+  for (const phase of ['stt', 'model', 'playback']) {
+    const f = fixture({ segmentRecording: false }), previous = new AbortController();
+    f.c.activeRequestController = previous; f.c.activeTurnId = 'previous-real-turn';
+    f.c.activeRequestSource = '';
+    const forbidden = () => { throw new Error(`must preserve the child ${phase}`); };
+    f.c.cancelConversationTurn = forbidden;
+    f.c.interruptActiveReply = forbidden;
+    const result = await f.speak('黑兵从 e7 走到 e5。');
+    assert.equal(result.ok, false); assert.match(result.error, /再听一遍/);
+    assert.equal(previous.signal.aborted, false);
+    assert.equal(f.c.activeRequestController, previous);
+    assert.equal(f.c.activeTurnId, 'previous-real-turn');
+    assert.equal(f.requests.length, 0); assert.equal(f.plays.length, 0);
+    assert.equal(f.c.segmentRecording, false);
+  }
+});
+
+test('an actual child request survives a late automatic opponent explanation', async () => {
   const f = fixture(), previous = new AbortController();
+  f.c.segmentRecording = false;
   f.c.activeRequestController = previous; f.c.activeTurnId = 'previous-real-turn';
-  f.c.cancelConversationTurn = id => assert.equal(id, 'previous-real-turn');
+  const cancelled = [];
+  f.c.cancelConversationTurn = id => cancelled.push(id);
   vm.runInContext(section('async function interruptActiveReply()', 'function cancelChessExplanation('), f.c);
-  const pending = f.speak('白兵向前走。'); await nextTick();
-  assert.equal(previous.signal.aborted, true); assert.equal(f.requests.length, 0);
-  f.c.chessBoard.isOpen = false; f.c.cancelChessExplanation(true);
-  assert.equal(f.calls.includes('listen'), false);
-  f.c.activeRequestController = null; f.c.activeTurnId = null;
-  assert.equal((await pending).aborted, true);
+  previous.signal.addEventListener('abort', () => { f.c.activeRequestController = null; });
+  const pending = f.speak('黑兵从 e7 走到 e5。'); await nextTick();
+  assert.equal(previous.signal.aborted, false);
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(cancelled, []);
+  assert.equal((await pending).ok, false);
+});
+
+test('a fresh chess click opens continuous voice and resumes listening after the initial explanation', async () => {
+  const f = fixture({ conversationActive: false, chessBoard: null, segmentRecording: false });
+  const permission = deferred(); let starts = 0, spoken;
+  f.c.startContinuousConversation = async () => {
+    starts++; f.c.conversationStarting = true;
+    await permission.promise;
+    f.c.conversationStarting = false; f.c.conversationActive = true; f.c.beginContinuousSegment();
+  };
+  f.c.ChessBoard = class {
+    constructor(options) { this.options = options; }
+    open() { this.isOpen = true; spoken = this.options.onSpeak('白兵每次向前走。'); }
+  };
+  const opening = f.c.openChessActivity(); await nextTick();
+  assert.equal(starts, 1); assert.equal(f.requests.length, 0);
+  permission.resolve(); await opening; await nextTick();
+  assert.equal(f.c.chessBoard.isOpen, true); assert.equal(f.c.conversationActive, true);
+  assert.equal(f.requests.length, 1); assert.equal(f.requests[0].url, '/api/tts');
+  f.requests[0].wait.resolve(response()); await nextTick();
+  assert.equal(f.plays.length, 1);
+  f.plays[0].wait.resolve(); assert.equal((await spoken).ok, true);
   assert.equal(f.c.segmentRecording, true);
-  assert.equal(f.calls.filter(item => item === 'listen').length, 1);
+  assert.equal(f.c.activeRequestController, null);
+  assert.equal(starts, 1);
+});
+
+test('a superseded or parent-disabled chess entry is not opened after microphone permission resolves', async () => {
+  for (const scenario of ['superseded', 'disabled']) {
+    const f = fixture({ conversationActive: false, chessBoard: null });
+    const permission = deferred(); let opened = 0;
+    f.c.startContinuousConversation = () => permission.promise;
+    f.c.ChessBoard = class { open() { opened++; } };
+    const pending = f.c.openChessActivity(); await nextTick();
+    assert.equal(opened, 0);
+    if (scenario === 'superseded') f.c.chessOpenGeneration++;
+    else f.c.activityEnabled = () => false;
+    permission.resolve(); await pending;
+    assert.equal(opened, 0);
+    assert.equal(f.requests.length, 0);
+  }
 });
 
 test('the shared WAV player does not extend interaction timing for an automatic chess explanation', async () => {

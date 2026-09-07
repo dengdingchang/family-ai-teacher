@@ -581,15 +581,38 @@ class MemoryStore:
                 self._write_json(self.skills_path, graph)
         return changed
 
+    @staticmethod
+    def _child_interest_clauses(text: str) -> list[str]:
+        """Conservative current preferences/requests, not reported speakers.
+
+        Ambiguous, quoted, historical and conditional language stays in session
+        text; this rule does not reinterpret or remove existing family memories.
+        """
+        unquoted = re.sub(r'“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|"[^"\n]*"|\'[^\'\n]*\'', "", text)
+        first_person = r"我(?:(?:最近|现在|今天|还|也|很|最|特别|真的))*"
+        preference = first_person + r"(?:喜欢|想(?:要)?(?:学|听|画|玩)|要(?:学|听|画|玩))"
+        request = r"(?:请)?(?:(?:教我|带我)(?:学|听|画|玩|认识)?|(?:给我)?讲(?:一个|个).{0,16}故事)"
+        result = []
+        for sentence in re.findall(r"[^。！？!?；;]+[。！？!?；;]?", unquoted):
+            sentence = re.sub(r"^(?:爸爸(?:老师)?|妈妈|老师)[，,\s]*", "", sentence.strip())
+            if re.search(r'[?？“”「」『』‘’"\']|吗|呢|是不是|是否|什么|怎么|为什么|如果|假如|要是|假设|以前|从前|曾经|昨天|过去|上次|小时候', sentence):
+                continue
+            # Do not split "妈妈说，我喜欢..." into a supposed child statement.
+            if not re.match(rf"(?:{preference}|{first_person}(?:不喜欢|不想|不要)|{request})", sentence):
+                continue
+            for clause in re.split(r"[，,]|但是|不过|但", sentence):
+                clause = clause.strip()
+                if (re.match(rf"(?:{preference}|{request})", clause)
+                        and not re.search(r"不喜欢|不喜歡|不想|不要|讨厌|討厭|不知道|不确定|不是", clause)):
+                    result.append(clause)
+        return result
+
     def observe_turn(self, user_text: str, assistant_text: str) -> dict[str, Any]:
         """Extract a small set of reviewable memories and update learning exposure."""
 
         candidates: list[dict[str, Any]] = []
         clean_user = self._clean_text(user_text)
-        clauses = re.split(r"[，,。！？!?；;]|但是|不过|但", clean_user)
-        positive_interests = [clause for clause in clauses
-                              if any(marker in clause for marker in ("喜欢", "想学", "想听", "想画", "想玩"))
-                              and not re.search(r"不喜欢|不喜歡|不想|不要|讨厌|討厭", clause)]
+        positive_interests = self._child_interest_clauses(clean_user)
         if positive_interests:
             for topic in INTEREST_TOPICS:
                 if any(topic in clause for clause in positive_interests):
