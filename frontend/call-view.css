@@ -1,0 +1,46 @@
+.stage-card.call-view {
+  position: fixed; inset: 0; z-index: 1000; width: 100%; height: 100dvh;
+  max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: oklch(.968 .011 93); overflow: hidden;
+}
+.call-view .video-pair, .call-view .video-tile { display: contents; }
+.call-view .stage-heading, .call-view .video-meta, .call-view .stage-footer,
+.call-view .vision-result, .call-view .activity-row, .call-view #recordHint,
+.call-view #captureButton, .call-view #recordVideoButton, .call-view #capturedFrame { display: none; }
+.call-view .child-video-meta { display: contents; }
+.call-view .child-video-meta > div:first-child { display: none; }
+.call-view .video-frame {
+  position: absolute; inset: 16px 16px 108px; width: auto; height: auto;
+  aspect-ratio: auto; max-height: none; border-radius: 22px; outline: none;
+}
+.call-view[data-call-primary="dad"] .child-video .video-frame,
+.call-view[data-call-primary="child"] .dad-video .video-frame {
+  inset: 32px 32px auto auto; width: clamp(112px, 20vw, 240px); height: auto;
+  aspect-ratio: 4 / 3; max-height: 28vh; z-index: 5; cursor: pointer;
+  border: 3px solid oklch(.992 .006 95); border-radius: 18px;
+  box-shadow: 0 4px 20px oklch(.29 .031 164 / .16);
+}
+.call-view [role="button"].video-frame:focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
+.call-view [role="button"] .video-placeholder { padding: 8px; gap: 2px; }
+.call-view [role="button"] .child-portrait { width: 45px; height: 45px; margin: 0; }
+.call-view [role="button"] .video-placeholder strong { font-size: 13px; }
+.call-view [role="button"] .video-placeholder span { display: none; }
+.call-view [role="button"] .frame-label { top: 5px; left: 5px; padding: 4px 7px; }
+.call-view .conversation-controls { position: absolute; bottom: 24px; left: 24px; display: block; width: min(34%, 350px); margin: 0; }
+.call-view .record-button { min-height: 56px; width: 100%; margin: 0; font-size: 18px; }
+.call-view #cameraToolbar { position: absolute; bottom: 24px; left: calc(50% - 28px); display: block; }
+.call-view #cameraButton { width: 56px; height: 56px; }
+.call-view-tools { position: absolute; bottom: 24px; right: 24px; display: flex; gap: 12px; }
+.call-view-tools[hidden] { display: none; }
+.call-view-tools button { min-height: 56px; padding: 12px 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); color: var(--ink); font-family: inherit; font-size: 17px; font-weight: 600; cursor: pointer; }
+.call-view-tools button:hover { background: var(--accent-soft); }
+.call-view-tools button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 640px) {
+  .call-view .video-frame { inset: 8px 8px 160px; border-radius: 16px; }
+  .call-view[data-call-primary="dad"] .child-video .video-frame,
+  .call-view[data-call-primary="child"] .dad-video .video-frame { top: 20px; right: 20px; width: 112px; }
+  .call-view .conversation-controls { left: 16px; right: 16px; bottom: 84px; width: auto; }
+  .call-view #cameraToolbar { left: 16px; bottom: 16px; }
+  .call-view-tools { right: 16px; bottom: 16px; gap: 8px; }
+  .call-view-tools button { padding: 12px 16px; font-size: 16px; }
+}
