@@ -35,6 +35,8 @@ let childProfileLoaded = false;
 let mediaConversationWasActive = false;
 let mediaPlaybackGeneration = 0;
 let mediaResumePending = false;
+let mediaSuggestionRequestController = null;
+let mediaSuggestionGeneration = 0;
 let pageIsLeaving = false;
 
 async function resumeConversationAfterMedia(generation) {
@@ -205,37 +207,68 @@ function buildMediaHistoryTurn(group) {
   label.textContent = "爸爸老师";
   const heading = document.createElement("p");
   heading.className = "media-history-heading";
-  heading.textContent = "找到可以一起看的图片和视频";
+  heading.textContent = group.message || "找到可以一起看的图片和视频";
   const cards = document.createElement("div");
   cards.className = "media-history-cards";
-  message.append(label, heading, cards);
+  message.append(label, heading);
+  if (group.cards.length) message.append(cards);
   turn.append(message);
-  mediaViewer.container = cards;
-  mediaViewer.appendCards(group.cards);
+  if (group.cards.length) {
+    mediaViewer.container = cards;
+    mediaViewer.appendCards(group.cards);
+  }
   return turn;
 }
 
+function cancelMediaSuggestionLookup() {
+  mediaSuggestionGeneration += 1;
+  const controller = mediaSuggestionRequestController;
+  mediaSuggestionRequestController = null;
+  controller?.abort();
+}
+
 async function loadMediaSuggestions(query) {
+  cancelMediaSuggestionLookup();
+  const generation = mediaSuggestionGeneration;
   const text = String(query || "").replace(/\s+/g, "");
   const topics = [
     ["刷牙", ["刷牙", "牙刷", "牙齿", "牙齒"]], ["恐龙", ["恐龙", "恐龍", "霸王龙", "暴龍"]],
     ["月亮", ["月亮", "月球"]], ["太空", ["太空", "宇宙", "星球"]], ["鱼", ["鱼", "魚"]],
     ["钢琴", ["钢琴", "鋼琴", "琴键", "琴鍵"]], ["红绿灯", ["红绿灯", "紅綠燈", "交通灯", "交通燈"]],
   ];
-  const topic = topics.find(([, aliases]) => aliases.some(alias => text.includes(alias)))?.[0] || "";
+  const educationTopics = [
+    "蝴蝶", "蜜蜂", "熊猫", "长颈鹿", "大象", "海豚", "鲸鱼", "鲨鱼", "企鹅", "乌龟",
+    "青蛙", "狮子", "老虎", "斑马", "袋鼠", "猫头鹰", "孔雀", "蜗牛", "蚂蚁", "瓢虫",
+    "彩虹", "火山", "地震", "云朵", "闪电", "雪花", "太阳", "地球", "星星", "海洋",
+    "森林", "沙漠", "河流", "瀑布", "山峰", "春天", "夏天", "秋天", "冬天", "太阳系",
+    "木星", "火星", "土星", "火车", "飞机", "轮船", "汽车", "自行车", "直升机", "火箭",
+    "小提琴", "吉他", "架子鼓", "长笛", "向日葵", "蒲公英", "苹果树", "水循环", "磁铁",
+  ];
+  const topic = topics.find(([, aliases]) => aliases.some(alias => text.includes(alias)))?.[0]
+    || educationTopics.find(candidate => text.includes(candidate)) || "";
   if (!topic) return;
+  const controller = new AbortController();
+  mediaSuggestionRequestController = controller;
   try {
     const response = await fetch("/api/media/suggestions", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic }),
+      signal: controller.signal,
     });
+    if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const payload = await response.json().catch(() => ({}));
+    if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const returnedTopic = String(payload.topic || "");
-    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards) || !payload.cards.length
+    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards)
         || mediaSuggestionGroups.some(group => group.topic === returnedTopic)) return;
-    mediaSuggestionGroups.push({ topic: returnedTopic, cards: payload.cards });
+    const message = payload.cards.length ? "" : payload.reason === "source_unavailable"
+      ? `这次暂时连不上${topic}图片，我们先继续聊。`
+      : `这次没有找到合适的${topic}图片，我们先继续聊。`;
+    mediaSuggestionGroups.push({ topic: returnedTopic, cards: payload.cards, message });
     renderHistory();
   } catch (_) {
     // Learning cards are optional; voice and local activities stay available.
+  } finally {
+    if (mediaSuggestionRequestController === controller) mediaSuggestionRequestController = null;
   }
 }
 
@@ -1111,6 +1144,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
   if (typeof chessSpeechController !== "undefined" && chessSpeechController) cancelChessExplanation();
   if (activeRequestController) return { ok: false, busy: true };
   if (signal?.aborted) return { ok: false, aborted: true };
+  if (typeof cancelMediaSuggestionLookup === "function") cancelMediaSuggestionLookup();
   continuous = continuous || conversationActive;
   if (continuous) {
     stopVadLoop();
@@ -1632,6 +1666,7 @@ async function startContinuousConversation() {
 
 function stopContinuousConversation() {
   globalThis.familyInteractionClock?.end();
+  if (typeof cancelMediaSuggestionLookup === "function") cancelMediaSuggestionLookup();
   conversationActive = false;
   segmentShouldSend = false;
   void cancelConversationTurn(activeTurnId);
@@ -2045,6 +2080,7 @@ for (const button of activityButtons) {
 }
 function handlePageHide() {
   pageIsLeaving = true;
+  cancelMediaSuggestionLookup();
   mediaPlaybackGeneration += 1;
   mediaResumePending = false;
   mediaConversationWasActive = false;

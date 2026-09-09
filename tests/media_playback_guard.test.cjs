@@ -55,7 +55,7 @@ test("pagehide invalidates media and music resume state before either viewer is 
   const context = vm.createContext({
     pageIsLeaving: false, mediaPlaybackGeneration: 7, mediaResumePending: true,
     mediaConversationWasActive: true, musicConversationWasActive: true,
-    chessOpenGeneration: 2, cancelChessExplanation() {}, cancelMusicExplanation() {},
+    chessOpenGeneration: 2, cancelChessExplanation() {}, cancelMusicExplanation() {}, cancelMediaSuggestionLookup() {},
     musicStudio: { destroy() { observations.push({
       kind: "music", leaving: context.pageIsLeaving, shouldResume: context.musicConversationWasActive,
     }); } },
