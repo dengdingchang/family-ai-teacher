@@ -61,6 +61,7 @@ function fixture() {
     } },
     // A controlled producer of the documented component callbacks; real studio
     // oscillators, mode generation, and tail events have their own module tests.
+    prepareMusicTheme() {}, cancelMusicTheme() {},
     MusicStudio: class {
       constructor(callbacks) { options = callbacks; this.opened = false; this.listeningAllowed = false; this.feedback = element(); }
       open() { this.opened = true; this.listeningAllowed = true; options.onListeningChange(true); }

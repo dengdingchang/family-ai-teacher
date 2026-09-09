@@ -6,6 +6,12 @@ const TRUSTED_MEDIA_HOSTS = Object.freeze([
   "ytimg.com",
   "cdc.gov",
   "mouthhealthy.org",
+  "nasa.gov",
+  "si.edu",
+  "pbskids.org",
+  "sesamestreet.org",
+  "khanacademy.org",
+  "kids.nationalgeographic.com",
 ]);
 
 function hostIsTrusted(hostname) {
@@ -48,7 +54,7 @@ function text(value, maximum) {
 
 export class MediaViewer {
   constructor({ container, document: doc = globalThis.document,
-    later, cancelLater, closeDelayMs = 5000,
+    later, cancelLater, now, closeDelayMs = 5000,
     onOpen = () => {}, onClose = () => {} } = {}) {
     if (!container || !doc?.body || typeof doc.createElement !== "function") {
       throw new Error("MediaViewer needs a container and document body");
@@ -58,6 +64,7 @@ export class MediaViewer {
     this.win = doc.defaultView || globalThis;
     this.later = later || ((fn, ms) => this.win.setTimeout(fn, ms));
     this.cancelLater = cancelLater || (handle => this.win.clearTimeout(handle));
+    this.now = now || (() => this.win.performance?.now?.() ?? Date.now());
     this.closeDelayMs = Math.max(1000, Number(closeDelayMs) || 5000);
     this.onOpen = onOpen;
     this.onClose = onClose;
@@ -214,13 +221,19 @@ export class MediaViewer {
     image.referrerPolicy = "no-referrer";
     image.decoding = "async";
     const title = this._node("p", "media-viewer__title", normal.title);
-    const replay = this._button("↻ 再看一次", "media-viewer__control media-viewer__replay", () => this._restartImageTimer());
+    const replay = this._button(`↻ 继续看${Math.ceil(this.closeDelayMs / 1000)}秒`, "media-viewer__control media-viewer__replay", () => this._restartImageTimer());
+    replay.setAttribute("aria-label", `再看一次：继续看这张图片${Math.ceil(this.closeDelayMs / 1000)}秒`);
     const caption = this._node("div", "media-viewer__caption");
     caption.append(title);
     if (normal.source) caption.append(this._node("p", "media-viewer__source", `来源：${normal.source}`));
     this.imageStatus = this._node("p", "media-viewer__hint", "图片正在打开…");
     this.imageStatus.setAttribute("role", "status");
     caption.append(this.imageStatus);
+    this.imageCountdown = this._node("p", "media-viewer__countdown");
+    // Announce replay once through imageStatus, not every countdown tick.
+    this.imageCountdown.setAttribute("aria-hidden", "true");
+    this.imageCountdown.hidden = true;
+    caption.append(this.imageCountdown);
     const footer = this._node("div", "media-viewer__footer");
     footer.append(caption, replay);
     panel.append(image, footer);
@@ -259,6 +272,8 @@ export class MediaViewer {
   _prepareImageTimer(overlay, image) {
     this.timer = {
       handle: null,
+      tickHandle: null,
+      revision: 0,
       loaded: false,
       remaining: this.closeDelayMs,
       failed: false,
@@ -270,7 +285,7 @@ export class MediaViewer {
       if (this.timer !== timer || this.overlay !== overlay || !image.isConnected) return;
       timer.loaded = true;
       timer.remaining = this.closeDelayMs;
-      this.imageStatus.textContent = `${Math.round(this.closeDelayMs / 1000)}秒后收起，想看可以说“再看一次”`;
+      this.imageStatus.textContent = "想继续看这张图，可以说“再看一次”";
       this._startImageTimer();
     }, { once: true });
     image.addEventListener("error", () => {
@@ -286,9 +301,21 @@ export class MediaViewer {
   _startImageTimer() {
     const timer = this.timer;
     if (!timer?.loaded || timer.handle !== null || !this.overlay) return;
+    const revision = ++timer.revision;
+    const deadline = this.now() + timer.remaining;
     timer.handle = this.later(() => {
-      if (this.timer === timer) this.close();
+      if (this.timer === timer && timer.revision === revision) this.close();
     }, timer.remaining);
+    if (timer.failed) return;
+    const tick = () => {
+      if (this.timer !== timer || timer.revision !== revision) return;
+      timer.tickHandle = null;
+      const remaining = Math.max(0, deadline - this.now());
+      this.imageCountdown.hidden = false;
+      this.imageCountdown.textContent = `${Math.ceil(remaining / 1000)} 秒后收起`;
+      if (remaining > 0) timer.tickHandle = this.later(tick, Math.min(1000, remaining));
+    };
+    tick();
   }
 
   _restartImageTimer() {
@@ -296,8 +323,11 @@ export class MediaViewer {
     if (!timer?.loaded) return;
     if (timer.failed) { this.reopenLastImage(); return; }
     if (timer.handle !== null) this.cancelLater(timer.handle);
+    if (timer.tickHandle !== null) this.cancelLater(timer.tickHandle);
     timer.handle = null;
     timer.remaining = this.closeDelayMs;
+    // Replay extends the same picture; it never requests a generated variation.
+    this.imageStatus.textContent = "好，继续看这张图。";
     this._startImageTimer();
   }
 
@@ -336,12 +366,14 @@ export class MediaViewer {
     const trigger = this.trigger;
     const openKind = this.openKind;
     if (this.timer && this.timer.handle !== null) this.cancelLater(this.timer.handle);
+    if (this.timer && this.timer.tickHandle !== null) this.cancelLater(this.timer.tickHandle);
     this.timer = null;
     this.overlay?.remove();
     this.overlay = null;
     this.panel = null;
     this.closeButton = null;
     this.imageStatus = null;
+    this.imageCountdown = null;
     this.trigger = null;
     this.openKind = null;
     if (openKind) this.onClose(openKind);

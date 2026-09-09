@@ -9,6 +9,7 @@ for (const mode of ['requested', 'ordinary', 'denied', 'cancelled']) {
     const requests = []; let captures = 0, streams = 0;
     const c = vm.createContext({
       activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
+      mediaResumePending: false,
       queueGeneration: 0,
       conversationActive: false, avatarReady: false, AbortController, FormData, Blob, DOMException,
       globalThis: { crypto: { randomUUID: () => 'observation-test-turn' } },
@@ -48,6 +49,7 @@ for (const mode of ['disconnected', 'done-failed', 'late-cancel']) {
     const requests = []; let played = 0;
     const c = vm.createContext({
       activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
+      mediaResumePending: false,
       queueGeneration: 1, conversationActive: false, avatarReady: false,
       AbortController, FormData, Blob, DOMException,
       globalThis: { crypto: { randomUUID: () => 'incomplete-test-turn' } },

@@ -8,6 +8,7 @@ const studioModule = import(pathToFileURL(path.join(__dirname, "../frontend/musi
 class Element {
   constructor(tag, doc) { this.tagName = tag.toUpperCase(); this.doc = doc; this.children = []; this.handlers = new Map(); this.style = {}; this.dataset = {}; this.attributes = {}; this.hidden = false; this.isConnected = true; this.textContent = ""; }
   append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = [...nodes]; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name]; }
   addEventListener(type, fn) { this.handlers.set(type, [...(this.handlers.get(type) || []), fn]); }
@@ -251,4 +252,122 @@ test("denied permission and a recorder start error do not leave ordinary listeni
   const failed = await fixture({ MediaRecorder: FailingRecorder, acquireMicrophone: async () => ({}) }); failed.studio.open(); failed.studio.setMode("sing");
   try { await failed.studio.startSinging(); assert.equal(failed.studio.listeningAllowed, true); assert.equal(failed.studio.recording, null); }
   finally { failed.studio.destroy(); }
+});
+
+test("the visible piano progresses through all eight real phrases and narrates concrete completion", async () => {
+  const spoken = [], f = await fixture({ onSpeak: async text => { spoken.push(text); return { ok: true }; } }); f.studio.open();
+  try {
+    for (let level = 0; level < 8; level++) {
+      assert.equal(f.studio.journey.index, level); assert.equal(f.studio.beats.length, f.studio.reference.length);
+      for (const [index, id] of f.studio.reference.entries()) { f.setClock(level * 20000 + index * 550); f.studio.keys.get(id).dispatch("click"); }
+      assert.equal(f.studio.journey.completed.size, level + 1);
+      assert.equal(f.studio.nextButton.hidden, level === 7);
+      f.runTimers(); await new Promise(resolve => setImmediate(resolve));
+      assert.match(spoken.at(-1), /下一关|欢乐颂/);
+      if (level < 7) { f.studio.nextButton.dispatch("click"); await new Promise(resolve => setImmediate(resolve)); f.runTimers(); }
+    }
+    assert.equal(f.studio.reference.length, 15); assert.match(f.studio.lessonTitle.textContent, /欢乐颂/);
+    assert.match(f.studio.journeyProgress.textContent, /8\/8/);
+  } finally { f.studio.destroy(); }
+});
+
+test("rhythm mode uses current notes, waits patiently, progresses, and restores listening after piano/praise tails", async () => {
+  const changes = [], f = await fixture({ onListeningChange: value => changes.push(value) }); f.studio.open(); f.studio.setMode("rhythm");
+  try {
+    await f.studio.demo(); assert.equal(f.studio.rhythmRound.active, true); assert.equal(f.studio.tokens.length, 3);
+    const round = f.studio.rhythmRound;
+    f.setClock(round.dueAt + 4000); f.studio.keys.get("G4").dispatch("click");
+    assert.equal(round.index, 0); assert.equal(round.waiting, true); assert.match(f.studio.feedback.textContent, /是哆/);
+    for (const id of ["C4", "D4", "E4"]) { f.setClock(round.dueAt + 1000); f.studio.keys.get(id).dispatch("click"); }
+    assert.equal(f.studio.rhythmRound, null); assert.equal(f.studio.journey.completed.size, 1);
+    assert.match(f.studio.feedback.textContent, /接住了全部3个/); assert.doesNotMatch(f.studio.feedback.textContent, /跟上了节拍/);
+    assert.equal(f.studio.listeningAllowed, false);
+    f.runTimers(); await new Promise(resolve => setImmediate(resolve)); assert.equal(f.studio.listeningAllowed, true);
+    f.studio.handleVoiceCommand("下一关"); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.studio.reference, ["E4", "D4", "C4"]); assert.equal(f.studio.rhythmRound.active, true);
+    f.studio.close(); assert.equal(f.studio.rhythmTimer, null); assert.equal(f.studio.listeningAllowed, false);
+  } finally { f.studio.destroy(); }
+});
+
+test("a late rhythm narration or stale animation cannot revive a closed or hidden activity", async () => {
+  let finish; const f = await fixture({ onSpeak: () => new Promise(resolve => { finish = resolve; }) }); f.studio.open(); f.studio.setMode("rhythm");
+  try {
+    const starting = f.studio.demo(); f.studio.setMode("piano"); finish({ ok: true }); await starting;
+    assert.equal(f.studio.rhythmRound, null); assert.equal(f.timers.size, 0); assert.equal(f.studio.listeningAllowed, true);
+    f.studio.onSpeak = async () => ({ ok: true }); f.studio.setMode("rhythm"); await f.studio.demo();
+    const oldFrame = f.timers.get(f.studio.rhythmTimer); f.doc.hidden = true; f.events.dispatch("visibilitychange");
+    assert.equal(f.studio.rhythmRound, null); assert.equal(f.studio.rhythmTimer, null); oldFrame(); assert.equal(f.timers.size, 0);
+    assert.equal(f.studio.listeningAllowed, false); f.doc.hidden = false; f.events.dispatch("visibilitychange");
+    assert.equal(f.studio.listeningAllowed, true); assert.equal(f.studio.rhythmRound, null);
+  } finally { f.studio.destroy(); }
+});
+
+test("rhythm slower/retry and named theme voice commands are deliberate and reject quoted or negative requests", async () => {
+  const { parseMusicVoiceCommand } = await studioModule;
+  for (const [text, command] of [["爸爸老师下一关", "next"], ["再来一次", "demo"], ["玩接音符", "rhythm"], ["换成奥特曼主题", "theme:ultraman"], ["换成奶龙主题", "theme:nailong"], ["我的世界主题", "theme:minecraft"], ["迷你特工队主题", "theme:mini-force"]]) assert.equal(parseMusicVoiceCommand(text), command);
+  for (const text of ["不要下一关", "奶龙是谁", "他说换主题", "接音符是什么", "别再来一次", "换主题？"]) assert.equal(parseMusicVoiceCommand(text), "", text);
+  const f = await fixture(); f.studio.open(); f.studio.setMode("rhythm");
+  try {
+    await f.studio.demo(); const original = f.studio.rhythmRound;
+    f.studio.handleVoiceCommand("慢一点"); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(original.active, false); assert.ok(f.studio.rhythmRound.beatMs > original.beatMs);
+    const active = f.studio.rhythmRound; f.studio.handleVoiceCommand("换成动物主题");
+    assert.equal(f.studio.rhythmRound, active, "theme selection does not restart progress");
+  } finally { f.studio.destroy(); }
+});
+
+test("theme previews use host art only, reject foreign/stale URLs, and keep playable symbols on failure", async () => {
+  const requests = []; let finish;
+  const f = await fixture({ onThemeRequest: (subject, meta) => { requests.push({ subject, meta }); return new Promise(resolve => { finish = resolve; }); } });
+  f.studio.win = { location: { origin: "http://127.0.0.1:8760" } }; f.studio.open();
+  try {
+    f.studio.handleVoiceCommand("换成奥特曼主题"); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests[0].subject, "奥特曼"); assert.match(f.studio.feedback.textContent, /正在准备奥特曼/);
+    f.studio.changeTheme("animals"); finish({ url: "/api/media/generated/old.png" }); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests[0].meta.isCurrent(), false); assert.equal(f.studio.themeArtwork.size, 0);
+    f.studio.changeTheme("ultraman");
+    assert.equal(f.studio.setThemeArtwork("奥特曼", "https://unapproved.example/image.png"), false);
+    assert.equal(f.studio.setThemeArtwork("奥特曼", "javascript:alert(1)"), false);
+    assert.equal(f.studio.setThemeArtwork("奶龙", "/api/media/generated/theme.png"), false);
+    assert.equal(f.studio.setThemeArtwork("奥特曼", "/api/media/generated/theme.png"), true);
+    const key = f.studio.keys.get("C4"); assert.equal(key.children[0].tagName, "IMG"); assert.match(key.children[0].alt, /主题预览/);
+    key.children[0].dispatch("error"); assert.equal(f.studio.themeArtwork.size, 0); assert.equal(key.children[0].tagName, "SPAN");
+    f.studio.close(); assert.equal(f.studio.setThemeArtwork("奥特曼", "/api/media/generated/late.png"), false);
+  } finally { f.studio.destroy(); }
+});
+
+test("new studio instances resume stored lessons; from-head reset persists without touching other storage", async () => {
+  const entries = new Map([["unrelated", "keep-me"]]);
+  const storage = { getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) };
+  const first = await fixture({ storage }); first.studio.open();
+  first.studio.nextLesson(); first.studio.nextLesson(); first.studio.destroy();
+  const { MUSIC_PROGRESS_KEY } = await import(pathToFileURL(path.join(__dirname, "../frontend/music-curriculum.js")).href);
+  assert.deepEqual(JSON.parse(entries.get(MUSIC_PROGRESS_KEY)), { version: 1, currentLessonId: "come-home", completedLessonIds: [] });
+  const resumed = await fixture({ storage }); resumed.studio.open();
+  try {
+    assert.equal(resumed.studio.reference.length, 4); assert.equal(resumed.studio.journey.index, 2); assert.equal(resumed.studio.resetButton.hidden, false);
+    for (const [index, id] of resumed.studio.reference.entries()) { resumed.setClock(index * 500); resumed.studio.keys.get(id).dispatch("click"); }
+    assert.deepEqual(JSON.parse(entries.get(MUSIC_PROGRESS_KEY)).completedLessonIds, ["come-home"]);
+    assert.equal(resumed.studio.handleVoiceCommand("不要从头练"), false); assert.equal(resumed.studio.journey.index, 2);
+    resumed.studio.resetButton.dispatch("click");
+    assert.equal(resumed.studio.journey.index, 0); assert.equal(resumed.studio.journey.completed.size, 0); assert.equal(resumed.studio.resetButton.hidden, true);
+    assert.deepEqual(JSON.parse(entries.get(MUSIC_PROGRESS_KEY)), { version: 1, currentLessonId: "steps-up", completedLessonIds: [] });
+    assert.equal(entries.get("unrelated"), "keep-me"); assert.equal(entries.size, 2);
+  } finally { resumed.studio.destroy(); }
+});
+
+test("unavailable storage remains playable and voice reset cancels the old rhythm round", async () => {
+  const storage = { getItem() { throw new Error("storage blocked"); }, setItem() { throw new Error("quota"); } };
+  const { parseMusicVoiceCommand } = await studioModule;
+  assert.equal(parseMusicVoiceCommand("爸爸老師從頭練"), "reset"); assert.equal(parseMusicVoiceCommand("从第一关开始"), "reset");
+  assert.equal(parseMusicVoiceCommand("他说从头练"), ""); assert.equal(parseMusicVoiceCommand("从头练是什么意思"), "");
+  const f = await fixture({ storage }); f.studio.open(); f.studio.setMode("rhythm");
+  try {
+    f.studio.nextLesson(); await new Promise(resolve => setImmediate(resolve)); const old = f.studio.rhythmRound;
+    assert.equal(f.studio.handleVoiceCommand("从头练"), true); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(old.active, false); assert.equal(f.studio.journey.index, 0); assert.equal(f.studio.rhythmRound.active, true);
+    const round = f.studio.rhythmRound;
+    for (const id of f.studio.reference) { f.setClock(round.dueAt); f.studio.keys.get(id).dispatch("click"); }
+    assert.equal(f.studio.journey.completed.size, 1);
+  } finally { f.studio.destroy(); }
 });

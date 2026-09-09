@@ -23,7 +23,7 @@ This is a product interface. Restrained color carries function: forest green is 
 1. Use a FaceTime/WeChat-like stage: Dad's avatar is the centered primary view and the child's camera is a small picture-in-picture view. Clicking the small view swaps primary and secondary without reacquiring either media stream. The explicitly opened drawing board temporarily uses the full viewport.
 2. Fit the primary stage, voice action, full-width activity row and the beginning of the shared conversation into the first desktop screen. Never let two large equal video tiles push interaction below the fold.
 3. Keep the primary voice action dominant. Place drawing, story and one unified play entry across the full width below the stage; the play entry reveals chess, an interaction game, piano and singing as large second-level choices. The keyboard form lives in a native expandable adult helper.
-4. Put completed history and the current live turn in one shared conversation feed and one scroll axis. Text, expressive icons and trusted media cards use the same message flow; persistence still waits for playback acknowledgement.
+4. Give images, videos and learning links their own large shared stage. Keep the adult transcript quiet: 13px text, one recent turn by default, at most ten when expanded, one vertical message flow. Keep live STT/TTS in that compact feed; persistence still waits for playback acknowledgement. Media must not be squeezed into transcript bubbles or reused for a different requested topic.
 5. The child’s closed-camera state explicitly says voice alone works. Camera preview requires an explicit action. Frame upload is separately intentional.
 6. AI identity is stated in the header and footer. Preserve Nathan’s real image and tested avatar decoder. Speaking bars communicate state; they are not a fake lip animation.
 7. During listening, the existing bars follow the microphone RMS already sampled by voice activity detection. They show loudness, never recognition confidence or correctness. Silence rests at a stable low height; a new listening segment, released input, or another state clears the previous level. Use transform-only motion, keep the existing speaking animation, and hold listening bars still under reduced motion. Do not add microphone access, polling, storage, or repeated accessibility announcements for this feedback.
@@ -41,6 +41,8 @@ Keep the voice controls usable while drawing and put concise feedback beside the
 
 ## Parent surface
 
+Model and network controls live in an expandable parent-only section. Show the selected service, model and separate search/image providers; never return a saved key to the browser. Testing is explicit and does not save. Saving applies to future requests; switching image providers cancels obsolete jobs. Explain subscription access and separately billed API access here, not in the child's play surface.
+
 Reading order is today, growth journal, learning states, family memory, then expandable settings. Dad’s message is prominent beside today. Technical endpoints and model identifiers do not belong in growth content.
 
 Statistics are a compact text strip, without fabricated growth percentages. Topic contact is labeled as contact, not competence. Confirmed milestones and candidates use different wording. Empty states explain what a real conversation will provide.
@@ -54,5 +56,9 @@ Weekly journals and parent messages begin with four entries. The earlier-record 
 Repeated explicit wishes to spend time with Dad or Mom appear first among that week's facts. Keep the count visible and the three most recent dated source quotes in a native expandable section. Present recorded wishes without diagnosing emotions or assuming that a parent has not responded.
 
 ## Verification boundaries
+
+Music offers eight increasing phrases and a forgiving five-lane rhythm mode. Missed notes wait at the landing line, wrong presses keep progress, and actual achievements receive specific spoken encouragement. Use public-domain melody data and optional generated theme previews with separate commercial-rights status. A versioned localStorage record stores only the current and completed exercise IDs; refresh resumes practice, and “从头练” clears only this record. It is not a family memory or mastery score.
+
+The image overlay starts its five-second countdown after the image loads. “继续看5秒” visibly restarts that countdown for the same image. Explicit open-ended requests generate in the background; ordinary conversation continues. Video playback pauses speech capture; closing resumes it after outstanding speech requests release ownership.
 
 Visual and interaction QA uses local browsers without real microphone or camera capture. Synthetic fixtures are browser route responses, never saved to the family database. Screenshots are review evidence under `runtime/`. Physical voice quality, camera understanding and real-time lip synchronization require their own end-to-end evidence.

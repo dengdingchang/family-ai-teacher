@@ -22,10 +22,13 @@
 .chess-board__grid { position: relative; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); width: 100%; aspect-ratio: 1; border: 2px solid #355b43; border-radius: 8px; overflow: hidden; }
 .chess-board__guide-path { position: absolute; z-index: 3; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .chess-board__guide-path line { stroke: #d27c3d; stroke-width: 18; stroke-linecap: round; opacity: .8; }
+.chess-board__guide-path line[hidden] { display: none; }
 .chess-board__guide-path path { fill: #d27c3d; }
 .chess-board__square { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: #f3eedf; color: #163325; font: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; }
 .chess-board__square.is-dark { background: #91ad8c; }
 .chess-board__square.is-selected { background: #e2c86d; box-shadow: inset 0 0 0 3px #78611b; }
+.chess-board__square.is-complete { background: #d7ebc9; box-shadow: inset 0 0 0 4px #205844; }
+.chess-board__square.is-complete .chess-board__target { color: #205844; font-weight: 800; }
 .chess-board__square.is-legal::after { content: ""; position: absolute; width: 24%; height: 24%; border-radius: 50%; background: #186344a8; pointer-events: none; }
 .chess-board__square.is-legal:has(.chess-board__piece:not(:empty))::after { width: 90%; height: 90%; border: 4px solid #186344; background: none; }
 .chess-board__square.is-guidance-source::before, .chess-board__square.is-guidance-target::before { content: ""; position: absolute; z-index: 4; width: 80%; height: 80%; border: 5px solid #e27935; border-radius: 50%; background: #fff6bd66; box-shadow: 0 0 0 5px #fff8d699; pointer-events: none; }
@@ -38,6 +41,7 @@
 .chess-board__target { position: absolute; z-index: 2; right: 3px; top: 1px; color: #8c5a06; text-shadow: 0 1px #fff; font-size: 19px; pointer-events: none; }
 .chess-board__target[hidden] { display: none; }
 .chess-board__board-hint { margin: 10px 0; color: #60746c; font-size: 14px; line-height: 1.5; }
+.chess-board__board-hint.is-success { color: #205844; background: #e7f1e1; border-radius: 10px; padding: 10px 12px; font-size: 16px; font-weight: 600; }
 .chess-board__panel { padding: 20px; border: 1px solid #e0e2d5; border-radius: 18px; background: #fbfaf5; }
 .chess-board__lesson-title { margin: 0; font-size: 21px; line-height: 1.5; }
 .chess-board__turn { font-weight: 700; color: #205844; line-height: 1.5; }

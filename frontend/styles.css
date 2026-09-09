@@ -587,6 +587,26 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 16px;
 }
+.adult-transcript .card-heading { margin-bottom: 8px; }
+.adult-transcript h2 { display: none; }
+.adult-transcript .eyebrow { margin: 0; font-size: 12px; }
+.adult-transcript .chat-history { min-height: 0; max-height: 150px; padding: 6px 10px; }
+.adult-transcript.expanded .chat-history { max-height: 320px; }
+.adult-transcript .chat-message { padding: 5px 9px; border-radius: 6px; }
+.adult-transcript .chat-message p, .adult-transcript .answer-box { font-size: 13px; line-height: 1.45; }
+.adult-transcript .chat-speaker { display: inline; font-size: 11px; margin: 0 6px 0 0; }
+.adult-transcript .history-turn, .adult-transcript .chat-stream { gap: 4px; }
+.adult-transcript .history-turn + .history-turn { margin-top: 7px; padding-top: 7px; }
+.adult-transcript .history-time { display: none; }
+.adult-transcript.expanded .history-time { display: block; font-size: 10px; }
+.adult-transcript .chat-history .live-turn { margin-top: 5px; padding-top: 5px; }
+.history-toggle { min-height: 48px; padding: 8px 12px; border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.shared-media-stage { margin-top: 22px; }
+.shared-media-stage[hidden] { display: none; }
+.shared-media-stage .media-history-message { background: var(--paper); padding: 12px; }
+.shared-media-stage .chat-speaker { display: none; }
+.shared-media-stage .media-history-heading { font-size: 15px; margin-bottom: 10px; }
+.shared-media-stage .media-history-cards { width: 100%; }
 .chat-history {
   max-height: 660px;
   min-height: 320px;

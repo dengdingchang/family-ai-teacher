@@ -90,6 +90,91 @@ test("the first lesson uses visible source, path and target guidance without rel
   } finally { f.board.destroy(); }
 });
 
+test("each completed lesson speaks concrete praise, marks its destination and waits for the child to continue", async () => {
+  const f = await fixture(); f.board.open();
+  try {
+    const lessons = [
+      ["e2", "e3", /白兵向前走了一格.*e2.*e3/, /白兵向前一步/],
+      ["d4", "d7", /白车沿着直线走了三格.*d4.*d7/, /白车沿直线/],
+      ["d4", "f5", /白马向右两格、再向上一格.*d4.*f5/, /白马拐个弯/],
+    ];
+    for (let index = 0; index < lessons.length; index++) {
+      const [from, to, praise, visible] = lessons[index];
+      f.click(from); f.click(to);
+      const speech = f.speech.at(-1);
+      assert.match(speech, praise, "the real onSpeak callback receives action-specific success text");
+      assert.match(speech, index < 2 ? /说‘下一课’/ : /再学一遍.*和爸爸下棋/);
+      assert.ok(speech.length <= 200, "host TTS accepts the complete explanation");
+      assert.match(f.board.cells.get(to).cell.className, /is-complete/);
+      assert.equal(f.board.cells.get(to).target.textContent, "✓");
+      assert.equal(f.board.cells.get(to).target.hidden, false);
+      assert.match(f.board.cells.get(to).cell.getAttribute("aria-label"), /这一步完成了/);
+      assert.match(f.board.boardHint.textContent, visible);
+      assert.match(f.board.boardHint.className, /is-success/);
+      const count = f.speech.length, position = f.board.game.fen();
+      f.click(to); f.click(from); f.click(to);
+      await settle();
+      assert.equal(f.speech.length, count, "extra taps cannot interrupt success narration");
+      assert.equal(f.board.game.fen(), position);
+      assert.equal(f.board.lessonIndex, index, "completion never forces the next lesson");
+      assert.equal(f.timers.size, 0);
+      if (index < 2) {
+        assert.equal(f.board.handleVoiceCommand("爸爸老师，下一课"), true);
+        assert.doesNotMatch(f.board.boardHint.className, /is-success/);
+        assert.equal([...f.board.cells.values()].some(({ cell }) => /is-complete/.test(cell.className)), false);
+      }
+    }
+    assert.equal(f.board.handleVoiceCommand("再学一遍"), true);
+    assert.equal(f.board.lessonIndex, 0); assert.equal(f.board.lessonComplete, false);
+  } finally { f.board.destroy(); }
+});
+
+test("chess voice controls reject unrelated speech and never skip an unfinished lesson", async () => {
+  const { ChessBoard } = await boardModule;
+  for (const [text, expected] of [["爸爸老师，下一课吧", "next"], ["下一課", "next"], ["给我提示一下", "hint"], ["再听一遍", "repeat"], ["重来这一步", "reset"], ["再学一遍", "learn"], ["和爸爸下棋", "play"], ["悔棋", "undo"], ["退出棋盘", "close"]]) {
+    assert.equal(ChessBoard.parseVoiceCommand(text), expected, text);
+  }
+  for (const text of ["不要下一课", "我不想悔棋", "爸爸刚才说下一课", "小兔子重新开始跑了", "我想听一个故事", "下一课讲什么", "把图片关闭", "a".repeat(81), null]) {
+    assert.equal(ChessBoard.parseVoiceCommand(text), null, String(text));
+  }
+  const f = await fixture();
+  try {
+    assert.equal(f.board.handleVoiceCommand("下一课"), false);
+    f.board.open(); const initial = f.board.game.fen();
+    assert.equal(f.board.handleVoiceCommand("下一课"), true);
+    assert.equal(f.board.lessonIndex, 0); assert.equal(f.board.game.fen(), initial);
+    assert.match(f.speech.at(-1), /先完成这一步/);
+    f.board.handleVoiceCommand("提示一下"); assert.equal(f.board.guidancePhase, "path");
+    const hint = f.speech.at(-1); f.board.handleVoiceCommand("再听一遍"); assert.equal(f.speech.at(-1), hint);
+    f.board.handleVoiceCommand("和爸爸下棋"); assert.equal(f.board.mode, "play");
+    f.click("e2"); f.click("e4");
+    f.board.handleVoiceCommand("悔棋"); assert.equal(f.board.game.history().length, 0);
+    f.board.handleVoiceCommand("退出棋盘"); assert.equal(f.board.isOpen, false);
+    assert.equal(f.board.handleVoiceCommand("再学一遍"), false);
+  } finally { f.board.destroy(); }
+});
+
+test("late success narration cannot overwrite a voice-requested next lesson or resume after closing", async () => {
+  const pending = [];
+  const f = await fixture({ onSpeak: text => new Promise(resolve => pending.push({ text, resolve })) }); f.board.open();
+  try {
+    f.click("e2"); f.click("e3");
+    const success = pending.at(-1);
+    assert.match(success.text, /对啦.*白兵/);
+    f.click("e3"); assert.equal(pending.at(-1), success);
+    f.board.handleVoiceCommand("下一课");
+    const next = pending.at(-1), current = f.board.speechStatus.textContent;
+    assert.match(next.text, /认识白车/);
+    success.resolve({ ok: false, error: "stale synthetic result" }); await settle();
+    assert.equal(f.board.speechStatus.textContent, current);
+    assert.equal(f.board.speaking, true); assert.equal(f.board.lessonIndex, 1);
+    f.board.handleVoiceCommand("下一课"); assert.equal(f.board.lessonIndex, 1, "duplicate commands cannot skip an incomplete lesson");
+    f.board.close();
+    for (const request of pending) request.resolve({ ok: true });
+    await settle(); assert.equal(f.timers.size, 0); assert.equal(f.board.speaking, false);
+  } finally { f.board.destroy(); }
+});
+
 test("the second and third lessons compute their own source, target and arrow coordinates", async () => {
   const f = await fixture(); f.board.open();
   try {

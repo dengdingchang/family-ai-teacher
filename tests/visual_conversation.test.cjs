@@ -9,6 +9,7 @@ function conversation(overrides = {}) {
   const calls = [], requests = [];
   const c = vm.createContext({
     activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
+    mediaResumePending: false,
     activeRequestSource: '', drawingBoard: null, queueGeneration: 1,
     musicStudio: null, mediaViewer: { handleVoiceCommand: () => false, close() {} },
     conversationActive: true, segmentRecording: true, segmentShouldSend: true, segmentPcmChunks: [1],
@@ -50,6 +51,43 @@ test('a photo reply pauses an already-open microphone and resumes it for the nex
   assert.equal(voice.ok, true);
   assert.equal(f.calls.filter(x => x === 'listen').length, 2);
   assert.equal(f.requests.filter(x => x.url.endsWith('/complete')).length, 2);
+});
+
+test('a slow interrupted completion releases its controller before the real finalizer resumes post-video listening', async () => {
+  let resolveReceipt, receiptStarted = false, clock = 0;
+  const receipt = new Promise(resolve => { resolveReceipt = resolve; });
+  const f = conversation({
+    conversationStarting: false, mediaPlaybackGeneration: 7,
+    performance: { now: () => clock },
+    setTimeout(fn) { clock += 1000; queueMicrotask(fn); },
+    mediaViewer: { openKind: null, handleVoiceCommand: () => false, close() {} },
+    fetch: async url => {
+      if (url.endsWith('/complete')) { receiptStarted = true; return receipt; }
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+  vm.runInContext(extract('async function resumeConversationAfterMedia(', 'const mediaViewer = new MediaViewer'), f.c);
+  const resumes = [];
+  f.c.beginContinuousSegment = () => {
+    resumes.push({ controller: f.c.activeRequestController, source: f.c.activeRequestSource, turn: f.c.activeTurnId });
+    f.c.segmentRecording = true;
+  };
+  const pending = f.c.sendStreamingRequest({ endpoint: '/api/conversation/stream', body: new FormData(), source: 'child-voice' });
+  for (let attempt = 0; !receiptStarted && attempt < 30; attempt++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(receiptStarted, true, 'the interruption must happen while a completion receipt is pending');
+  const controller = f.c.activeRequestController;
+  f.c.interruptedRequestController = controller; controller.abort();
+  f.c.segmentRecording = false;
+  f.c.mediaResumePending = true;
+  await f.c.resumeConversationAfterMedia(7);
+  assert.equal(f.c.mediaResumePending, true, 'the bounded early resume keeps the intent while its receipt is still slow');
+  assert.equal(resumes.length, 0);
+  resolveReceipt({ ok: true, json: async () => ({ ok: true }) });
+  const result = await pending;
+  assert.equal(result.interrupted, true);
+  assert.deepEqual(resumes, [{ controller: null, source: '', turn: null }], 'the actual sendStreamingRequest finally must invoke resume after releasing all ownership');
+  assert.equal(f.c.mediaResumePending, false);
+  assert.equal(f.c.segmentRecording, true);
 });
 
 test('a spoken picture replay consumes the UI command without old activity audio or completion', async () => {

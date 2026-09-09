@@ -380,6 +380,23 @@
             <p id="nextSuggestion">根据兴趣与学习阶段，生成一项短活动。</p>
           </article>
 
+          <details class="panel model-panel" id="modelPanel">
+            <summary><h2>爸爸老师的大脑与联网</h2></summary>
+            <p class="panel-note">更改后从下一次请求生效。图片使用本机已登录的 Codex 套餐；OpenAI API 另行计费。</p>
+            <form id="modelForm" class="stack-form">
+              <label>对话服务<select id="modelProvider"><option value="compatible">当前 AI Station / OpenAI 兼容服务</option><option value="openai">OpenAI API（GPT 模型）</option></select></label>
+              <label>服务地址<input id="modelBaseUrl" type="url" required autocomplete="off" placeholder="https://api.openai.com/v1"></label>
+              <label>模型名称<input id="modelName" required maxlength="160" list="modelExamples" autocomplete="off"></label>
+              <datalist id="modelExamples"><option value="gpt-5.6-sol"></option><option value="gpt-6-astra"></option></datalist>
+              <label>该服务的 API 密钥<input id="modelKey" type="password" autocomplete="new-password" placeholder="留空保留当前密钥"></label>
+              <label>最多等待（秒）<input id="modelTimeout" type="number" min="2" max="30" value="15" required></label>
+              <label>公开资料搜索<select id="searchProvider"><option value="codex">当前 Codex 套餐联网搜索</option><option value="openai">OpenAI API 联网搜索</option><option value="off">关闭联网搜索</option></select></label>
+              <label>图片生成<select id="imageProvider"><option value="codex">当前 Codex 套餐（系统分配图片模型）</option><option value="openai">Images 2.5 Flare API（快速档，另计费）</option></select></label>
+              <p class="panel-note">对话和当次主动提交的画面会发给所选服务。搜索只发本次资料主题，图片只发本次绘图描述；不附加家庭记录或原始录音。密钥只存本机 .env，不回显、不写入家庭导出。</p>
+              <div class="form-actions"><button id="testModel" class="quiet-button" type="button">测试连接</button><button class="primary-button" type="submit">保存并应用</button></div>
+              <p id="modelSaveStatus" class="save-status" role="status"></p>
+            </form>
+          </details>
           <details class="panel data-panel">
             <summary>
               <p class="eyebrow">家庭拥有，也由家庭掌握</p>
@@ -421,5 +438,6 @@
     </main>
     <script src="/daily-guidance.js?v=20260909-server-date" defer></script>
     <script src="/parent.js?v=20260909-server-date" defer></script>
+    <script src="/parent-models.js?v=20260910-1" defer></script>
   </body>
 </html>

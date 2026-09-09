@@ -43,6 +43,7 @@ for (const fail of [true, false]) {
     const requests = [];
     Object.assign(c, {
       activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
+      mediaResumePending: false,
       conversationActive: false, avatarReady: false, AbortController, FormData, Blob,
       globalThis: {crypto:{randomUUID:() => 'fixture-turn'}},
       setBusy(){}, setStatus(){}, resetLiveTurn(){}, stopBargeInMonitor(){}, hideLiveTurn(){},
@@ -71,6 +72,7 @@ test('ending conversation after SSE done but before audio ends never sends a com
   let finishDrain, playerCancelled = false;
   const c = vm.createContext({
     activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
+    mediaResumePending: false,
     queueGeneration: 0, queuePlaybackError: null, queueDraining: false, audioQueue: [], queueDrainWaiters: [],
     streamingPlayback: null, activePlayback: null, activeAudio: null, activeAudioUrl: null,
     conversationActive: true, avatarReady: false, segmentShouldSend: false,

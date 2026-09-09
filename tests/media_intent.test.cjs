@@ -1,28 +1,29 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const path = require("node:path");
+const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 
 const api = import(pathToFileURL(path.join(__dirname, "../frontend/media-intent.js")).href);
 
 test("explicit child image topics win over old lesson words and generic look hints", async () => {
   const { chooseMediaSuggestion: choose } = await api;
-  assert.deepEqual(choose("我想看大蝴蝶", "小提示：看看衣服、玩具或积木。你找到红色了吗？"), { topic: "蝴蝶", generateImage: false });
-  assert.deepEqual(choose("给我看看飞机图片", "鱼会游泳，我们继续找红色。"), { topic: "飞机", generateImage: false });
-  assert.deepEqual(choose("我想看一下彩虹", "我们一起看月亮的图片。"), { topic: "彩虹", generateImage: true });
+  assert.deepEqual(choose("我想看大蝴蝶", "小提示：看看衣服、玩具或积木。你找到红色了吗？"), { topic: "蝴蝶", generateImage: true, kind: "image" });
+  assert.deepEqual(choose("给我看看飞机图片", "鱼会游泳，我们继续找红色。"), { topic: "飞机", generateImage: true, kind: "image" });
+  assert.deepEqual(choose("我想看一下彩虹", "我们一起看月亮的图片。"), { topic: "彩虹", generateImage: true, kind: "image" });
 });
 
 test("longest canonical alias preserves whale, shark, and solar system", async () => {
   const { chooseMediaSuggestion: choose } = await api;
   for (const [query, topic] of [["鲸鱼", "鲸鱼"], ["鲨鱼", "鲨鱼"], ["太阳系", "太阳系"], ["月球", "月亮"], ["霸王龙", "恐龙"], ["牙齒", "刷牙"]]) {
-    assert.deepEqual(choose(`我想看${query}的图片`, ""), { topic, generateImage: false });
+    assert.deepEqual(choose(`我想看${query}的图片`, ""), { topic, generateImage: true, kind: "image" });
   }
 });
 
 test("short look imperatives work without requiring the child to say I want", async () => {
   const { chooseMediaSuggestion: choose } = await api;
   for (const [child, topic] of [["看看彩虹", "彩虹"], ["看一下月亮", "月亮"], ["爸爸老师，看一看蝴蝶吧", "蝴蝶"]])
-    assert.deepEqual(choose(child, ""), { topic, generateImage: false });
+    assert.deepEqual(choose(child, ""), { topic, generateImage: true, kind: "image" });
   for (const child of ["看看衣服玩具", "看看你手里的蝴蝶", "别看看彩虹", "昨天看看彩虹"])
     assert.equal(choose(child, ""), null, child);
 });
@@ -51,22 +52,22 @@ test("refused, reported, historical, and cancelled media cannot be revived by th
 
 test("a later current request may replace a refused or reported topic", async () => {
   const { chooseMediaSuggestion: choose } = await api;
-  assert.deepEqual(choose("不要蝴蝶，我想看彩虹", ""), { topic: "彩虹", generateImage: false });
-  assert.deepEqual(choose("妈妈说，不过我想看彩虹", ""), { topic: "彩虹", generateImage: false });
+  assert.deepEqual(choose("不要蝴蝶，我想看彩虹", ""), { topic: "彩虹", generateImage: true, kind: "image" });
+  assert.deepEqual(choose("妈妈说，不过我想看彩虹", ""), { topic: "彩虹", generateImage: true, kind: "image" });
 });
 
 test("explicit drawing requests retain Codex generation intent", async () => {
   const { chooseMediaSuggestion: choose } = await api;
   for (const child of ["画一张蝴蝶图片", "给我画一个蝴蝶", "画幅蝴蝶的图", "画出蝴蝶", "生成一张蝴蝶图片", "做一张蝴蝶插图", "给我画蝴蝶图片", "我要一张蝴蝶的图片"]) {
-    assert.deepEqual(choose(child, ""), { topic: "蝴蝶", generateImage: true }, child);
+    assert.deepEqual(choose(child, ""), { topic: "蝴蝶", generateImage: true, kind: "image" }, child);
   }
 });
 
 test("explicit teacher drawing and educational display may introduce a topic", async () => {
   const { chooseMediaSuggestion: choose } = await api;
   for (const teacher of ["我来画一张磁铁的图片。", "我来画一张磁铁。", "爸爸老师给你画一张磁铁图画。", "我们一起看看磁铁的图片。", "给你看一张磁铁图片。", "我给你展示磁铁。"])
-    assert.deepEqual(choose("好的", teacher), { topic: "磁铁", generateImage: true }, teacher);
-  assert.deepEqual(choose("磁铁能吸什么", "我来画一张图片。"), { topic: "磁铁", generateImage: true });
+    assert.deepEqual(choose("好的", teacher), { topic: "磁铁", generateImage: true, kind: "image" }, teacher);
+  assert.deepEqual(choose("磁铁能吸什么", "我来画一张图片。"), { topic: "磁铁", generateImage: true, kind: "image" });
 });
 
 test("negative, hypothetical, quoted, and child-led drawing replies are not offers", async () => {
@@ -84,11 +85,49 @@ test("reopening existing images never starts a new media or generation job", asy
 
 test("video requests do not cause image generation from a topic mention", async () => {
   const { chooseMediaSuggestion: choose } = await api;
-  assert.deepEqual(choose("给我看看刷牙的视频", "我们一起看刷牙的视频。"), { topic: "刷牙", generateImage: false });
+  assert.deepEqual(choose("给我看看刷牙的视频", "我们一起看刷牙的视频。"), { topic: "刷牙", generateImage: false, kind: "video" });
 });
 
 test("server parent-boundary replies cannot be bypassed by a valid child request", async () => {
   const { chooseMediaSuggestion: choose } = await api;
   assert.equal(choose("我想看蝴蝶", "这个话题今天先放一放。我们数手指好吗？"), null);
   assert.equal(choose("画一张蝴蝶图片", "这个活动今天先休息。"), null);
+});
+
+for (const scenario of JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/open_media_requests.json"), "utf8"))) {
+  test(`open subject boundary: ${scenario.text}`, async () => {
+    const { chooseMediaSuggestion: choose } = await api;
+    const result = choose(scenario.text, "小提示：看看衣服、玩具或积木。你找到红色了吗？");
+    assert.deepEqual(result, scenario.topic === null ? null : {
+      topic: scenario.topic, kind: scenario.kind, generateImage: scenario.kind === "image",
+    });
+  });
+}
+
+test("teacher can introduce an explicit new scene without collapsing it into a known noun", async () => {
+  const { chooseMediaSuggestion: choose } = await api;
+  assert.deepEqual(choose("好", "爸爸老师给你画一张熊猫骑自行车的图片。"), {
+    topic: "熊猫骑自行车", kind: "image", generateImage: true,
+  });
+  assert.deepEqual(choose("蝴蝶会飞吗", "我来画一张会飞的机器人。"), {
+    topic: "会飞的机器人", kind: "image", generateImage: true,
+  });
+});
+
+test("a child's explicit video cannot turn into image generation through a stale teacher reply", async () => {
+  const { chooseMediaSuggestion: choose } = await api;
+  assert.deepEqual(choose("我想看小狐狸的视频", "我来画一张蝴蝶图片。"), {
+    topic: "小狐狸", kind: "video", generateImage: false,
+  });
+});
+
+test("long subjects are rejected whole and replay requests never generate", async () => {
+  const { chooseMediaSuggestion: choose, normalizeImageSubject } = await api;
+  assert.equal(choose(`我想看${"猫".repeat(81)}`, ""), null);
+  assert.equal(normalizeImageSubject("猫".repeat(81)), "");
+  for (const value of ["看看蝴蝶", "给我画熊猫", "孩子刚才说了一整句包含家庭信息的原话", "家庭历史"])
+    assert.equal(normalizeImageSubject(value), "", value);
+  assert.equal(choose("再给我看刚才那张图片", "我来画一张熊猫图片。"), null);
+  assert.equal(choose("蝴蝶", "给你看刚才的蝴蝶图片。"), null);
+  assert.equal(choose("蝴蝶", "给你看小明的照片。"), null);
 });

@@ -6,12 +6,12 @@
     <meta name="color-scheme" content="light" />
     <title>爸爸老师 · 家庭 AI 教室</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=20260910-child-chat" />
+    <link rel="stylesheet" href="/styles.css?v=20260910-compact-transcript" />
     <link rel="stylesheet" href="/call-view.css?v=20260910-large-avatar" />
     <link rel="stylesheet" href="/drawing-board.css?v=20260910-1" />
-    <link rel="stylesheet" href="/chess-board.css?v=20260906-1" />
-    <link rel="stylesheet" href="/music-studio.css?v=20260909-1" />
-    <link rel="stylesheet" href="/media-viewer.css?v=20260910-1" />
+    <link rel="stylesheet" href="/chess-board.css?v=20260910-feedback" />
+    <link rel="stylesheet" href="/music-studio.css?v=20260910-journey2" />
+    <link rel="stylesheet" href="/media-viewer.css?v=20260910-replay" />
     <link rel="stylesheet" href="/avatar-companion.css?v=20260910-1" />
   </head>
   <body>
@@ -226,13 +226,16 @@
           hidden
         ></div>
       </section>
-      <section class="interaction-card" aria-label="完整对话记录">
+      <section class="shared-media-stage" id="sharedMediaStage" aria-label="一起看图片和视频" hidden>
+        <div id="sharedMediaContent"></div>
+      </section>
+      <section class="interaction-card adult-transcript" aria-label="给大人看的最近对话">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">我们的对话</p>
+            <p class="eyebrow">给大人看 · 最近对话</p>
             <h2 id="conversationTitle">一起学，一起聊</h2>
           </div>
-          <span class="history-caption">往上滑，看看之前聊了什么</span>
+          <button id="historyToggle" class="history-toggle" type="button" aria-expanded="false">展开最近记录</button>
         </div>
         <div class="chat-shell">
           <div id="chatHistory"
@@ -240,7 +243,7 @@
             tabindex="0"
             role="log"
             aria-live="polite"
-            aria-label="完整聊天记录"
+            aria-label="最近聊天记录"
           >
             <p id="chatEmpty" class="chat-empty">
               还没有对话，先和爸爸老师说一句吧。
@@ -284,6 +287,6 @@
         </details>
       </footer>
     </main>
-  <script type="module" src="/app.js?v=20260910-child-companion"></script>
+  <script type="module" src="/app.js?v=20260910-learning-evolution2"></script>
   </body>
 </html>

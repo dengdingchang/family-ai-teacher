@@ -11,15 +11,35 @@ const RULES = { p: "兵向前走，吃棋子时斜着走一格。", r: "车沿�
   q: "后可以沿横线、竖线或斜线走，不能跳过棋子。", k: "王通常走相邻的一格，不能走到会被对方攻击的格子。" };
 const LESSONS = [
   { name: "兵，向前一步", fen: "7k/8/8/8/8/8/4P3/K7 w - - 0 1", from: "e2", to: "e3", piece: "p",
-    text: "先认识白兵。点一下 e2 的白兵，再点星星 e3，让它向前走一格。" },
+    text: "先认识白兵。点一下 e2 的白兵，再点星星 e3，让它向前走一格。",
+    praise: "对啦！你让白兵向前走了一格，方向找对了。", achievement: "白兵向前一步，走到星星啦！" },
   { name: "车，沿直线走", fen: "7k/8/8/8/3R4/8/8/K7 w - - 0 1", from: "d4", to: "d7", piece: "r",
-    text: "这次认识白车。点 d4 的白车，再点星星 d7，沿着直线向前走。" },
+    text: "这次认识白车。点 d4 的白车，再点星星 d7，沿着直线向前走。",
+    praise: "对啦！你让白车沿着直线走了三格，中途没有拐弯。", achievement: "白车沿直线，走到星星啦！" },
   { name: "马，拐个小弯", fen: "7k/8/8/8/3N4/8/8/K7 w - - 0 1", from: "d4", to: "f5", piece: "n",
-    text: "白马走日字。点 d4 的白马，再点星星 f5：向右两格，再向上一格。" },
+    text: "白马走日字。点 d4 的白马，再点星星 f5：向右两格，再向上一格。",
+    praise: "对啦！你让白马向右两格、再向上一格，走出了小小的日字。", achievement: "白马拐个弯，跳到星星啦！" },
 ];
 const pieceName = piece => `${piece.color === "w" ? "白" : "黑"}${NAMES[piece.type || piece.piece]}`;
 
 export class ChessBoard {
+  static parseVoiceCommand(value) {
+    if (typeof value !== "string" || value.length > 80) return null;
+    const text = value.replace(/[\s，。！？、,.!?]/g, "").replace(/^(?:爸爸老师|爸爸)/, "")
+      .replace(/^(?:请|帮我|给我)/, "").replace(/(?:吧|呀|啊|好吗|好不好)$/, "");
+    const commands = [
+      ["next", /^(?:下一[课課步关]|继续下一[课課步关]|开始下一[课課关])$/],
+      ["hint", /^(?:提示(?:一下)?|给个提示|怎么走|该怎么走|这一步怎么走)$/],
+      ["repeat", /^(?:再[听聽](?:一次|一遍)|再讲(?:一次|一遍)|再说(?:一次|一遍))$/],
+      ["reset", /^(?:重来(?:这一步|一次)?|重新开始|重新开局)$/],
+      ["learn", /^(?:再学一遍|重新学|跟爸爸学)$/],
+      ["play", /^(?:和爸爸下棋|和你下一盘|开始下棋)$/],
+      ["undo", /^(?:悔棋|退回一步|撤回一步)$/],
+      ["close", /^(?:退出(?:国际象棋|棋盘|下棋)|关闭(?:国际象棋|棋盘)|不下棋了)$/],
+    ];
+    return commands.find(([, pattern]) => pattern.test(text))?.[0] || null;
+  }
+
   constructor({ onSpeak = () => {}, onClose = () => {}, document: doc = globalThis.document,
     later, cancelLater, random = Math.random, nativeFullscreen = true } = {}) {
     if (!doc?.body) throw new Error("Chess board needs a document body");
@@ -100,7 +120,8 @@ export class ChessBoard {
     arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z"); marker.append(arrow); defs.append(marker);
     this.guideLine = this.doc.createElementNS?.("http://www.w3.org/2000/svg", "line") || this.doc.createElement("line");
     this.guideLine.setAttribute("marker-end", "url(#chess-guide-arrow)"); svg.append(defs, this.guideLine); this.grid.append(svg);
-    boardArea.append(this.grid, this._node("p", "chess-board__board-hint", "先点自己的棋子，再点亮起的格子。白棋在你这边。"));
+    this.boardHint = this._node("p", "chess-board__board-hint");
+    boardArea.append(this.grid, this.boardHint);
     const panel = this._node("aside", "chess-board__panel");
     this.lessonTitle = this._node("h3", "chess-board__lesson-title");
     this.feedback = this._node("p", "chess-board__feedback"); this.feedback.setAttribute("aria-live", "polite");
@@ -161,6 +182,24 @@ export class ChessBoard {
   nextLesson() {
     if (!this.isOpen || this.mode !== "learn" || !this.lessonComplete) return;
     this.lessonIndex = (this.lessonIndex + 1) % LESSONS.length; this.reset();
+  }
+  handleVoiceCommand(value) {
+    if (!this.isOpen || this.destroyed) return false;
+    const command = ChessBoard.parseVoiceCommand(value);
+    if (!command) return false;
+    if (command === "next") {
+      if (this.mode === "learn" && this.lessonComplete) this.nextLesson();
+      else if (this.mode === "learn") this._say(`我们先完成这一步。${LESSONS[this.lessonIndex].text}`);
+      else this.hint();
+    } else if (command === "hint") this.hint();
+    else if (command === "repeat") this._speak();
+    else if (command === "reset") this.reset();
+    else if (command === "learn" || command === "play") this.startMode(command);
+    else if (command === "undo") {
+      if (this.mode === "learn") this.reset();
+      else this.undo();
+    } else if (command === "close") this.close();
+    return true;
   }
   _setGuidance(phase, move) {
     this.guidancePhase = phase;
@@ -226,7 +265,9 @@ export class ChessBoard {
 
   selectSquare(square) {
     if (!this.isOpen || !this.cells.has(square)) return false;
-    if (this.mode === "learn" && this.lessonComplete) { this._say("这一步完成了。可以点下一课，也可以重来一次。"); return false; }
+    // An extra tap must not interrupt the specific success explanation. The
+    // child chooses next/replay/reset explicitly through a button or voice.
+    if (this.mode === "learn" && this.lessonComplete) return false;
     if (this.mode === "play" && this.game.isGameOver()) { this._say(this._ending()); return false; }
     if (this.game.turn() !== "w") { this._say("现在轮到爸爸的黑棋，等他走一步。"); return false; }
     const piece = this.game.get(square);
@@ -254,7 +295,10 @@ export class ChessBoard {
     }
     const move = this.game.move({ from: legal.from, to: legal.to, promotion: "q" });
     this.selected = null; this.hintMove = null;
-    if (this.mode === "learn") { this.lessonComplete = true; this._setGuidance("complete"); this._say(`${this._moveText(move)}你完成了这一步！${this.lessonIndex < 2 ? "准备好就点下一课。" : "兵、车和马都试过了。可以再学一次，或者和爸爸下一盘。"}`); }
+    if (this.mode === "learn") {
+      this.lessonComplete = true; this._setGuidance("complete");
+      this._say(`${LESSONS[this.lessonIndex].praise}${this._moveText(move)}${this.lessonIndex < 2 ? "准备好可以说‘下一课’，我们再认识一颗棋子。" : "兵、车和马都试过了。你可以说‘再学一遍’，或者‘和爸爸下棋’。"}`);
+    }
     else { this._setGuidance("none"); this._say(this._moveText(move) + (this._ending() || "现在轮到爸爸的黑棋。")); this._scheduleAi(); }
     return true;
   }
@@ -297,7 +341,7 @@ export class ChessBoard {
   hint() {
     if (!this.isOpen) return;
     if (this.mode === "learn") {
-      if (this.lessonComplete) { this._say("这一步完成了。准备好就点下一课，或重来一次。"); return; }
+      if (this.lessonComplete) { this._speak(); return; }
       const lesson = LESSONS[this.lessonIndex]; this.selected = lesson.from; this._setGuidance("path", { from: lesson.from, to: lesson.to }); this._say(lesson.text); return;
     }
     if (this.game.isGameOver()) { this._say(this._ending()); return; }
@@ -315,11 +359,12 @@ export class ChessBoard {
     const targetSquare = showPath ? guide.to : this.hintMove?.to;
     for (const [square, { cell, symbol, target, dark }] of this.cells) {
       const piece = this.game.get(square);
-      cell.className = `chess-board__square${dark ? " is-dark" : ""}${this.selected === square ? " is-selected" : ""}${legal.has(square) ? " is-legal" : ""}${showSource && guide?.from === square ? " is-guidance-source" : ""}${showPath && guide?.to === square ? " is-guidance-target" : ""}`;
+      const completed = learning && this.lessonComplete && square === lesson.to;
+      cell.className = `chess-board__square${dark ? " is-dark" : ""}${this.selected === square ? " is-selected" : ""}${legal.has(square) ? " is-legal" : ""}${showSource && guide?.from === square ? " is-guidance-source" : ""}${showPath && guide?.to === square ? " is-guidance-target" : ""}${completed ? " is-complete" : ""}`;
       symbol.textContent = piece ? SYMBOLS[piece.color][piece.type] : ""; symbol.className = `chess-board__piece ${piece?.color === "w" ? "is-white" : "is-black"}`;
-      target.hidden = targetSquare !== square; cell.tabIndex = this.focusSquare === square ? 0 : -1;
+      target.hidden = targetSquare !== square && !completed; target.textContent = completed ? "✓" : "★"; cell.tabIndex = this.focusSquare === square ? 0 : -1;
       cell.setAttribute("aria-selected", String(this.selected === square));
-      cell.setAttribute("aria-label", `${square}，${piece ? pieceName(piece) : "空格"}${legal.has(square) ? "，合法目标" : ""}${showSource && guide?.from === square ? "，先点这里" : ""}${showPath && guide?.to === square ? "，沿箭头到这里" : ""}${targetSquare === square ? "，星星目标" : ""}`);
+      cell.setAttribute("aria-label", `${square}，${piece ? pieceName(piece) : "空格"}${legal.has(square) ? "，合法目标" : ""}${showSource && guide?.from === square ? "，先点这里" : ""}${showPath && guide?.to === square ? "，沿箭头到这里" : ""}${targetSquare === square ? "，星星目标" : ""}${completed ? "，这一步完成了" : ""}`);
     }
     this.element.dataset.guidancePhase = this.guidancePhase;
     this.grid.dataset.guidancePhase = this.guidancePhase;
@@ -340,6 +385,8 @@ export class ChessBoard {
     this.learnButton.setAttribute("aria-pressed", String(learning)); this.playButton.setAttribute("aria-pressed", String(!learning));
     this.lessonTitle.textContent = learning ? `第 ${this.lessonIndex + 1} / 3 步 · ${lesson.name}` : "你执白棋，爸爸执黑棋";
     this.feedback.textContent = this.lastExplanation;
+    this.boardHint.className = `chess-board__board-hint${learning && this.lessonComplete ? " is-success" : ""}`;
+    this.boardHint.textContent = learning && this.lessonComplete ? `✓ ${lesson.achievement} 说“${this.lessonIndex < 2 ? "下一课" : "和爸爸下棋"}”就能继续。` : "先点自己的棋子，再点亮起的格子。白棋在你这边。";
     this.turnLabel.textContent = learning ? (this.lessonComplete ? "这一步完成了 ✓" : "把棋子送到星星格")
       : this._ending() || (this.game.turn() === "w" ? (this.game.isCheck() ? "白王被将军，先保护王" : "轮到你啦 · 白棋走") : "爸爸想一想 · 黑棋走");
     this.undoButton.hidden = learning; this.undoButton.disabled = this.game.history().length === 0;

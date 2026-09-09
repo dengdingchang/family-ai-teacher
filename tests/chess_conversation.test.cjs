@@ -20,6 +20,7 @@ function fixture(overrides = {}) {
     chessBoard: { isOpen: true }, chessSpeechController: null, chessSpeechGeneration: 0, chessOpenGeneration: 0,
     drawingBoard: null, conversationActive: true, conversationStarting: false,
     activeRequestController: null, activeRequestSource: '', activeTurnId: null, interruptedRequestController: null,
+    mediaResumePending: false,
     queueGeneration: 0, segmentRecording: true, segmentShouldSend: true, segmentPcmChunks: ['unfinished'],
     speechStartedAt: 0, loudSince: 0, bargeInMonitoring: false, bargeInPcmChunks: [], recordHint: {},
     activityEnabled: name => name === 'game' || name === 'drawing',

@@ -46,12 +46,12 @@ test("a later media topic aborts and rejects an older result even when it return
   assert.equal(requests.length, 2);
   assert.equal(requests[0].options.signal.aborted, true);
 
-  requests[1].wait.resolve({ ok: true, json: async () => ({ topic: "火山", cards: [{ kind: "image" }], reason: "" }) });
+  requests[1].wait.resolve({ ok: true, json: async () => ({ topic: "火山", cards: [{ kind: "image", topic: "火山" }], reason: "" }) });
   await volcano;
   requests[0].wait.resolve({ ok: true, json: async () => ({ topic: "蝴蝶", cards: [{ kind: "image" }], reason: "" }) });
   await butterfly;
   assert.deepEqual(groups.map(group => group.topic), ["火山"]);
-  assert.deepEqual(renders, [["火山"]]);
+  assert.deepEqual(renders, [["蝴蝶"], ["火山"], ["火山"]]);
 
   const rainbow = context.loadMediaSuggestions("看看彩虹");
   await new Promise(resolve => setImmediate(resolve));
@@ -85,16 +85,16 @@ test("generated image polling stays async and adds only the current topic result
       }) };
       return { ok: true, json: async () => ({
         topic: "蝴蝶", status: "completed",
-        card: { kind: "image", thumbnail_url: "/api/generated-media/0123456789abcdef01234567.png" },
+        card: { kind: "image", topic: "蝴蝶", thumbnail_url: "/api/generated-media/0123456789abcdef01234567.png" },
       }) };
     },
   });
   vm.runInContext(implementation, context);
   await context.loadMediaSuggestions("请给我画一张蝴蝶图");
-  assert.equal(requests[0].options.body, JSON.stringify({ topic: "蝴蝶", generate_image: true, image_job_id: jobId }));
+  assert.deepEqual(JSON.parse(requests[0].options.body), { topic: "蝴蝶", kind: "image", generate_image: true, image_job_id: jobId });
   assert.deepEqual(groups.map(group => group.topic), ["蝴蝶"]);
   assert.equal(groups[0].cards[0].thumbnail_url, "/api/generated-media/0123456789abcdef01234567.png");
-  assert.deepEqual(renders, [[0], [1]]);
+  assert.deepEqual(renders, [[0], [0], [1]]);
   assert.equal(requests.at(-1).url, "auto-open");
 });
 

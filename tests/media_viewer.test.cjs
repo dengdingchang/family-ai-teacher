@@ -56,9 +56,18 @@ async function fixture(options = {}) {
   const container = new Element("div", doc); doc.body.append(container);
   const timers = new Map(); let timerId = 0, clock = 0;
   const viewer = new MediaViewer({ container, document: doc, now: () => clock,
-    later(fn, ms) { const id = ++timerId; timers.set(id, { fn, ms }); return id; },
+    later(fn, ms) { const id = ++timerId; timers.set(id, { fn, ms, due: clock + ms }); return id; },
     cancelLater(id) { timers.delete(id); }, ...options });
-  return { viewer, doc, container, timers, events, setClock(value) { clock = value; } };
+  return { viewer, doc, container, timers, events, setClock(value) { clock = value; },
+    advance(ms) {
+      const end = clock + ms;
+      for (;;) {
+        const next = [...timers.entries()].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0];
+        if (!next) break;
+        clock = next[1].due; timers.delete(next[0]); next[1].fn();
+      }
+      clock = end;
+    } };
 }
 
 test("URL boundary requires HTTPS, an exact allowlisted host suffix, and canonical YouTube links", async () => {
@@ -67,6 +76,12 @@ test("URL boundary requires HTTPS, an exact allowlisted host suffix, and canonic
   assert.equal(trustedMediaUrl("https://wikipedia.org.evil.example/test"), "");
   assert.equal(trustedMediaUrl("https://user:secret@youtube.com/watch?v=AcYCMJvdupI"), "");
   assert.equal(trustedMediaUrl("https://youtube.com:444/watch?v=AcYCMJvdupI"), "");
+  for (const host of ["nasa.gov", "si.edu", "pbskids.org", "sesamestreet.org", "khanacademy.org", "kids.nationalgeographic.com"]) {
+    assert.equal(trustedMediaUrl(`https://${host}/learn`), `https://${host}/learn`);
+    assert.equal(trustedMediaUrl(`https://${host}.evil.example/learn`), "");
+    assert.equal(trustedMediaUrl(`http://${host}/learn`), "");
+  }
+  assert.equal(trustedMediaUrl("https://nationalgeographic.com/learn"), "", "the approved kids subdomain does not allow the whole site");
   assert.match(trustedMediaUrl("https://upload.wikimedia.org/example.jpg"), /^https:/);
   assert.equal(trustedMediaUrl("/api/generated-media/0123456789abcdef01234567.png"), "/api/generated-media/0123456789abcdef01234567.png");
   assert.equal(trustedMediaUrl("/api/generated-media/../../data/child_profile.json"), "");
@@ -101,20 +116,24 @@ test("image auto-close starts on load for five seconds, cannot freeze under a po
   assert.equal(f.timers.size, 0, "no close countdown exists before the large image loads");
   image.dispatch("load");
   assert.equal([...f.timers.values()][0].ms, 5000);
-  f.setClock(3000); overlay.dispatch("pointerdown");
-  assert.equal(f.timers.size, 1);
-  f.setClock(5000); overlay.dispatch("pointerup");
-  assert.equal([...f.timers.values()][0].ms, 5000);
-  overlay.dispatch("mouseenter"); assert.equal(f.timers.size, 1);
-  overlay.dispatch("mouseleave"); assert.equal([...f.timers.values()][0].ms, 5000);
-  f.setClock(6000); overlay.dispatch("focusin");
-  f.setClock(9000); overlay.dispatch("focusout", { relatedTarget: null });
-  assert.equal([...f.timers.values()][0].ms, 5000, "focus does not stop a voice-first display");
-  const replay = findAll(overlay, "button").find(button => button.textContent.includes("再看一次"));
+  assert.equal(f.viewer.imageCountdown.textContent, "5 秒后收起");
+  f.advance(3000); overlay.dispatch("pointerdown");
+  assert.equal(f.viewer.imageCountdown.textContent, "2 秒后收起");
+  overlay.dispatch("pointerup"); overlay.dispatch("mouseenter"); overlay.dispatch("mouseleave");
+  overlay.dispatch("focusin"); overlay.dispatch("focusout", { relatedTarget: null });
+  f.advance(1000);
+  assert.equal(f.viewer.imageCountdown.textContent, "1 秒后收起", "pointer and focus never freeze the visible countdown");
+  const replay = overlay.querySelector(".media-viewer__replay");
+  assert.match(replay.textContent, /继续看5秒/);
   replay.dispatch("click");
+  assert.equal(f.viewer.overlay, overlay, "continue shows the same picture, not a new generation");
+  assert.equal(f.viewer.imageCountdown.textContent, "5 秒后收起");
+  assert.match(f.viewer.imageStatus.textContent, /好，继续看这张图/);
   assert.equal([...f.timers.values()][0].ms, 5000);
-  [...f.timers.values()][0].fn();
+  f.advance(4999); assert.equal(f.viewer.overlay, overlay);
+  f.advance(1);
   assert.equal(f.viewer.overlay, null);
+  assert.equal(f.timers.size, 0, "closing cleans up both display and expiry timers");
   f.viewer.destroy();
 });
 
@@ -151,7 +170,7 @@ test("stale timers and image events cannot close or replace a newer viewer; Esca
   assert.equal(f.viewer.overlay, current);
   assert.equal(f.timers.size, 0);
   const image = findAll(current, "img")[0]; image.dispatch("load");
-  assert.equal(f.timers.size, 1);
+  assert.equal(f.timers.size, 2);
   let prevented = false, stopped = false;
   f.events.get("keydown")({ key: "Escape", preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } });
   assert.equal(prevented && stopped, true);
@@ -170,7 +189,7 @@ test("images use the active fullscreen host and failed loads are retryable witho
   findAll(overlay, "img")[0].dispatch("error");
   assert.match(f.viewer.imageStatus.textContent, /暂时没打开/);
   assert.equal([...f.timers.values()][0].ms, 5000);
-  findAll(overlay, "button").find(button => button.textContent.includes("再看一次")).dispatch("click");
+  overlay.querySelector(".media-viewer__replay").dispatch("click");
   assert.notEqual(f.viewer.overlay, overlay);
   findAll(f.viewer.overlay, "img")[0].dispatch("load");
   [...f.timers.values()][0].fn();
@@ -183,10 +202,29 @@ test("an automatically opened image cannot be frozen by appearing under a statio
   f.viewer.openImage({ kind: "image", title: "磁铁", url: "/api/generated-media/0123456789abcdef01234567.png", thumbnail_url: "/api/generated-media/0123456789abcdef01234567.png" });
   const overlay = f.viewer.overlay, image = findAll(overlay, "img")[0];
   image.dispatch("load");
-  assert.equal(f.timers.size, 1);
+  assert.equal(f.timers.size, 2);
   overlay.dispatch("mouseenter");
-  assert.equal(f.timers.size, 1, "a programmatic overlay keeps its child-friendly countdown");
+  assert.equal(f.timers.size, 2, "a programmatic overlay keeps its child-friendly countdown");
   [...f.timers.values()][0].fn();
+  assert.equal(f.viewer.overlay, null);
+  f.viewer.destroy();
+});
+
+test("replay ignores stale expiry and countdown callbacks from the previous interval", async () => {
+  const f = await fixture();
+  f.viewer.openImage({ kind: "image", title: "蝴蝶", url: "https://zh.wikipedia.org/wiki/test", thumbnail_url: "https://upload.wikimedia.org/butterfly.jpg" });
+  const overlay = f.viewer.overlay;
+  findAll(overlay, "img")[0].dispatch("load");
+  const staleCallbacks = [...f.timers.values()].map(timer => timer.fn);
+  f.advance(2000);
+  overlay.querySelector(".media-viewer__replay").dispatch("click");
+  staleCallbacks.forEach(callback => callback());
+  assert.equal(f.viewer.overlay, overlay);
+  assert.equal(f.viewer.imageCountdown.textContent, "5 秒后收起");
+  assert.equal(f.timers.size, 2, "only the latest expiry and countdown are scheduled");
+  f.advance(1000); assert.equal(f.viewer.imageCountdown.textContent, "4 秒后收起");
+  f.viewer.close(); staleCallbacks.forEach(callback => callback());
+  assert.equal(f.timers.size, 0);
   assert.equal(f.viewer.overlay, null);
   f.viewer.destroy();
 });

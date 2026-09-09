@@ -14,6 +14,7 @@ async (page) => {
     blockedRequests.push(url.pathname); return route.abort();
   });
   await page.addInitScript(() => {
+    navigator.mediaDevices ??= {};
     navigator.mediaDevices.getUserMedia = async () => { throw new Error("Physical media forbidden in picture QA"); };
     globalThis.WebSocket = class { constructor() { throw new Error("Sockets forbidden in picture QA"); } };
   });
@@ -39,7 +40,7 @@ async (page) => {
     await page.waitForFunction(() => qaViewer.timer?.loaded, null, { timeout: 7000 });
     const geometry = await page.evaluate(() => {
       const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
-      return { overlay: rect(".media-viewer"), image: rect(".media-viewer__image"), close: rect(".media-viewer__close"), replay: rect(".media-viewer__replay"), hint: document.querySelector(".media-viewer__hint").textContent,
+      return { overlay: rect(".media-viewer"), image: rect(".media-viewer__image"), close: rect(".media-viewer__close"), replay: rect(".media-viewer__replay"), hint: document.querySelector(".media-viewer__hint").textContent, countdown: document.querySelector(".media-viewer__countdown").textContent,
         focus: document.activeElement.className, overflow: document.documentElement.scrollWidth > innerWidth };
     });
     await page.screenshot({ path: `output/playwright/media-fullscreen-${width}x${height}-20260910.png` });
@@ -69,7 +70,7 @@ async (page) => {
     && item.geometry.image.width >= item.geometry.overlay.width - 40 && item.geometry.image.height > item.geometry.overlay.height * .65
     && item.geometry.close.width >= 48 && item.geometry.close.height >= 48
     && item.geometry.replay.width >= 48 && item.geometry.replay.height >= 48
-    && item.geometry.hint.includes("5秒") && !item.geometry.overflow && item.restoredFocus === "open")
+    && /[45] 秒后收起/.test(item.geometry.countdown) && !item.geometry.overflow && item.restoredFocus === "open")
     && results[0].autoCloseMs >= 4200 && results[0].autoCloseMs <= 6000
     && results.slice(1).every(item => item.trapped) && reopened && voiceClosed && fullscreen.hostCorrect
     && blockedRequests.length === 0 && errors.length === 0;

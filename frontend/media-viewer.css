@@ -100,6 +100,8 @@
 .media-viewer__source,
 .media-viewer__hint { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--muted, #60736b); font-size: 14px; line-height: 1.4; }
 .media-viewer__replay { flex-shrink: 0; }
+.media-viewer__countdown { margin: 6px 0 0; color: var(--primary, #205844); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.media-viewer__countdown[hidden] { display: none; }
 .media-viewer[data-kind="image"] .media-viewer__close { top: max(10px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); }
 .media-viewer__control:hover { background: var(--secondary, oklch(.93 .024 157)); }
 .media-viewer__control:active { background: oklch(.88 .025 157); }

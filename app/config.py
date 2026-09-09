@@ -108,6 +108,9 @@ class Settings:
     stt_device: str = "cpu"
     stt_cuda_library_dir: Path | None = None
     stt_fallback_model_path: Path | None = None
+    llm_provider: str = "compatible"
+    search_provider: str = "codex"
+    imagegen_provider: str = "codex"
 
     @classmethod
     def load(cls) -> "Settings":
@@ -156,6 +159,9 @@ class Settings:
             llm_base_url=os.getenv("LLM_BASE_URL", "").strip().rstrip("/"),
             llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
             llm_model=os.getenv("LLM_MODEL", "").strip(),
+            llm_provider=os.getenv("LLM_PROVIDER", "compatible").strip(),
+            search_provider=os.getenv("SEARCH_PROVIDER", "codex").strip(),
+            imagegen_provider=os.getenv("IMAGEGEN_PROVIDER", "codex").strip(),
             llm_timeout_seconds=max(2.0, min(30.0, float(os.getenv("LLM_TIMEOUT_SECONDS", "8")))),
             llm_vision_timeout_seconds=max(
                 5.0,

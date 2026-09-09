@@ -4,9 +4,9 @@ import "/interaction-clock.js?v=20260906-1";
 import "/drawing-board.js?v=20260910-1";
 import { CallView } from "/call-view.js?v=20260910-1";
 import { AvatarCompanion } from "/avatar-companion.js?v=20260910-1";
-import { MusicStudio, parseMusicVoiceCommand } from "/music-studio.js?v=20260910-1";
-import { MediaViewer } from "/media-viewer.js?v=20260910-1";
-import { chooseMediaSuggestion } from "/media-intent.js?v=20260910-1";
+import { MusicStudio, parseMusicVoiceCommand } from "/music-studio.js?v=20260910-journey2";
+import { MediaViewer } from "/media-viewer.js?v=20260910-replay";
+import { chooseMediaSuggestion } from "/media-intent.js?v=20260910-open";
 
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
@@ -48,6 +48,8 @@ async function resumeConversationAfterMedia(generation) {
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   if (generation !== mediaPlaybackGeneration || !mediaResumePending) return;
+  // The request finalizer retries after a slow playback receipt settles.
+  if (activeRequestController) return;
   mediaResumePending = false;
   if (conversationActive && !conversationStarting && !activeRequestController
       && !segmentRecording && mediaViewer.openKind !== "video") beginContinuousSegment();
@@ -137,6 +139,8 @@ let drawingBoard = null;
 let chessBoard = null;
 let musicStudio = null;
 let musicSpeechController = null;
+let musicThemeController = null;
+let musicThemeJobUrl = "";
 let musicConversationWasActive = false;
 let chessSpeechController = null;
 let chessSpeechGeneration = 0;
@@ -167,6 +171,14 @@ const bargeInGate = new globalThis.BargeInGate({
 });
 
 let historyRecords = [];
+let historyExpanded = false;
+document.querySelector("#historyToggle")?.addEventListener("click", event => {
+  historyExpanded = !historyExpanded;
+  event.currentTarget.textContent = historyExpanded ? "收起文字记录" : "展开最近记录";
+  event.currentTarget.setAttribute("aria-expanded", String(historyExpanded));
+  document.querySelector(".adult-transcript")?.classList.toggle("expanded", historyExpanded);
+  renderHistory();
+});
 
 function scrollHistoryToLatest() {
   if (!chatHistory) return;
@@ -225,6 +237,9 @@ function buildMediaHistoryTurn(group) {
 }
 
 function cancelMediaSuggestionLookup({ closeViewer = true } = {}) {
+  for (let index = mediaSuggestionGroups.length - 1; index >= 0; index--) {
+    if (mediaSuggestionGroups[index].pending && !mediaSuggestionGroups[index].cards.length) mediaSuggestionGroups.splice(index, 1);
+  }
   mediaSuggestionGeneration += 1;
   const controller = mediaSuggestionRequestController;
   mediaSuggestionRequestController = null;
@@ -260,7 +275,12 @@ async function pollGeneratedMedia(job, topic, group, controller, generation) {
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const response = await fetch(statusUrl, { signal: controller.signal });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || String(result.topic || "") !== topic) return;
+    if (!response.ok || String(result.topic || "") !== topic) {
+      group.pending = false;
+      if (!group.cards.length) group.message = "这次图片准备已停止，可以再说一次想看什么。";
+      renderHistory();
+      return;
+    }
     if (result.status === "failed") {
       if (mediaSuggestionJobStatusUrl === statusUrl) mediaSuggestionJobStatusUrl = "";
       if (!group.cards.length && generation === mediaSuggestionGeneration) {
@@ -274,12 +294,19 @@ async function pollGeneratedMedia(job, topic, group, controller, generation) {
       return;
     }
     if (result.status !== "completed" || !result.card) continue;
+    if (String(result.card.topic || "") !== topic) {
+      group.pending = false;
+      group.message = "这张图和刚才要的不一致，爸爸重新准备时再给你看。";
+      renderHistory();
+      return;
+    }
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const imageUrl = String(result.card.thumbnail_url || "");
     if (!group.cards.some(card => String(card.thumbnail_url || "") === imageUrl)) {
       group.cards.unshift(result.card);
     }
     group.message = "";
+    group.pending = false;
     if (mediaSuggestionJobStatusUrl === statusUrl) mediaSuggestionJobStatusUrl = "";
     renderHistory();
     if (!document.hidden && generation === mediaSuggestionGeneration) {
@@ -290,44 +317,50 @@ async function pollGeneratedMedia(job, topic, group, controller, generation) {
 }
 
 async function loadMediaSuggestions(childText, assistantText = "") {
-  cancelMediaSuggestionLookup();
-  const generation = mediaSuggestionGeneration;
   const suggestion = chooseMediaSuggestion(childText, assistantText);
   if (!suggestion) return;
-  const { topic, generateImage } = suggestion;
+  cancelMediaSuggestionLookup();
+  const generation = mediaSuggestionGeneration;
+  const { topic, generateImage, kind = "image" } = suggestion;
   const imageJobId = generateImage && typeof globalThis.crypto?.randomUUID === "function"
     ? globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase() : "";
   if (generateImage && !/^[0-9a-f]{32}$/.test(imageJobId)) return;
   if (imageJobId) mediaSuggestionJobStatusUrl = `/api/image-generation/jobs/${imageJobId}`;
   const controller = new AbortController();
   mediaSuggestionRequestController = controller;
+  const group = { topic, cards: [], pending: true, message: kind === "image"
+    ? `正在准备${topic}的图片，可以继续和爸爸说话。` : `正在找${topic}的学习资料，可以继续和爸爸说话。` };
+  mediaSuggestionGroups.push(group);
+  if (mediaSuggestionGroups.length > 3) mediaSuggestionGroups.shift();
+  renderHistory();
   try {
     const response = await fetch("/api/media/suggestions", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, generate_image: generateImage, image_job_id: imageJobId }),
+      body: JSON.stringify({ topic, kind, generate_image: generateImage, image_job_id: imageJobId }),
       signal: controller.signal,
     });
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const payload = await response.json().catch(() => ({}));
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const returnedTopic = String(payload.topic || "");
-    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards)) return;
+    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards)) {
+      group.message = `这次没能准备好${topic}，可以再试一次。`;
+      renderHistory();
+      return;
+    }
     const drawing = ["queued", "running"].includes(payload.image_generation);
+    payload.cards = payload.cards.filter(card => card && String(card.topic || "") === topic);
+    group.pending = drawing;
     const message = payload.cards.length ? "" : drawing ? `正在画${topic}，先继续聊。`
       : payload.image_generation === "busy" ? "图片任务有点忙，我们先继续聊。"
       : payload.image_generation === "failed" ? `这次没有画好${topic}，我们先继续聊。`
       : payload.reason === "source_unavailable"
       ? `这次暂时连不上${topic}图片，我们先继续聊。`
-      : `这次没有找到合适的${topic}图片，我们先继续聊。`;
-    let group = mediaSuggestionGroups.find(item => item.topic === returnedTopic);
-    if (!group) {
-      group = { topic: returnedTopic, cards: payload.cards, message };
-      mediaSuggestionGroups.push(group);
-    } else {
-      const existing = new Set(group.cards.map(card => String(card.thumbnail_url || "")));
-      group.cards.push(...payload.cards.filter(card => !existing.has(String(card.thumbnail_url || ""))));
-      group.message = message;
-    }
+      : payload.reason === "search_disabled" ? "家长暂时关闭了联网搜索。"
+      : payload.reason === "search_busy" ? "爸爸正在查资料，稍后再试一次。"
+      : `这次没有找到合适的${topic}${kind === "image" ? "图片" : "资料"}，我们先继续聊。`;
+    group.cards = payload.cards;
+    group.message = message;
     renderHistory();
     const displayCard = payload.cards.find(card => card?.generated === true)
       || payload.cards.find(card => card?.kind === "image" || card?.type === "image");
@@ -335,6 +368,8 @@ async function loadMediaSuggestions(childText, assistantText = "") {
       mediaSuggestionJobStatusUrl = "";
       mediaViewer.openImage(displayCard);
     }
+    const videoCard = kind === "video" && payload.cards.find(card => card.kind === "video");
+    if (videoCard && !document.hidden && generation === mediaSuggestionGeneration) mediaViewer.openVideo(videoCard);
     if (drawing) {
       mediaSuggestionJobStatusUrl = String(payload.image_generation_job?.status_url || "");
       await pollGeneratedMedia(payload.image_generation_job, topic, group, controller, generation);
@@ -342,8 +377,13 @@ async function loadMediaSuggestions(childText, assistantText = "") {
       mediaSuggestionJobStatusUrl = "";
     }
   } catch (_) {
+    if (!controller.signal.aborted && generation === mediaSuggestionGeneration) {
+      group.message = `这次准备${topic}没有成功，可以再试一次。`;
+      group.pending = false;
+      renderHistory();
+    }
     // Learning cards are optional; voice and local activities stay available.
-    const statusUrl = mediaSuggestionJobStatusUrl;
+    const statusUrl = mediaSuggestionRequestController === controller ? mediaSuggestionJobStatusUrl : "";
     if (/^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(statusUrl)) {
       fetch(`${statusUrl}/cancel`, { method: "POST", keepalive: true }).catch(() => {});
       mediaSuggestionJobStatusUrl = "";
@@ -358,7 +398,7 @@ function renderHistory() {
   chatHistory.replaceChildren();
   const visibleRecords = historyRecords.filter((record) => (
     String(record?.user_text || "").trim() || String(record?.assistant_text || "").trim()
-  ));
+  )).slice(historyExpanded ? -10 : -1);
   if (!visibleRecords.length && !mediaSuggestionGroups.length) {
     chatEmpty.hidden = false;
     chatEmpty.textContent = "还没有对话，先和爸爸老师说一句吧。";
@@ -382,8 +422,15 @@ function renderHistory() {
       );
       chatHistory.append(turn);
     }
-    for (const group of mediaSuggestionGroups) chatHistory.append(buildMediaHistoryTurn(group));
   }
+    const mediaContent = document.querySelector("#sharedMediaContent");
+    const mediaStage = document.querySelector("#sharedMediaStage");
+    if (mediaContent && mediaStage) {
+      mediaContent.replaceChildren();
+      const latest = mediaSuggestionGroups.at(-1);
+      mediaStage.hidden = !latest;
+      if (latest) mediaContent.append(buildMediaHistoryTurn(latest));
+    }
   // The current turn is part of this same scrolling log, never a second feed.
   chatHistory.append(liveTurn);
   scrollHistoryToLatest();
@@ -1225,7 +1272,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
   if (typeof chessSpeechController !== "undefined" && chessSpeechController) cancelChessExplanation();
   if (activeRequestController) return { ok: false, busy: true };
   if (signal?.aborted) return { ok: false, aborted: true };
-  if (typeof cancelMediaSuggestionLookup === "function") cancelMediaSuggestionLookup({ closeViewer: false });
+  // An ordinary spoken turn must not cancel an image being drawn in the background.
   continuous = continuous || conversationActive;
   if (continuous) {
     stopVadLoop();
@@ -1265,6 +1312,8 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
   let chessRequested = false;
   let localVoiceHandled = false;
   let pendingMusicCommand = "";
+  let pendingChessCommand = "";
+  let mediaLookupStarted = false;
   let chessContextGeneration = null;
   let childTurnText = "";
   try {
@@ -1307,12 +1356,17 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
           childTurnText = String(event.text || "").trim();
           if (source !== "drawing-observation") {
             if (musicStudio?.opened && parseMusicVoiceCommand(childTurnText)) pendingMusicCommand = childTurnText;
-            localVoiceHandled = Boolean(pendingMusicCommand) || mediaViewer.handleVoiceCommand(childTurnText);
+            if (typeof chessBoard !== "undefined" && chessBoard?.isOpen && globalThis.ChessBoard?.parseVoiceCommand?.(childTurnText)) pendingChessCommand = childTurnText;
+            localVoiceHandled = Boolean(pendingMusicCommand || pendingChessCommand) || mediaViewer.handleVoiceCommand(childTurnText);
             if (localVoiceHandled) {
               controller.abort();
               void cancelConversationTurn(turnId);
             } else {
               mediaViewer.close({ restoreFocus: false });
+              if (typeof chooseMediaSuggestion === "function" && chooseMediaSuggestion(childTurnText)) {
+                mediaLookupStarted = true;
+                void loadMediaSuggestions(childTurnText);
+              }
             }
           }
         } else if (event.event === "assistant_delta") {
@@ -1429,7 +1483,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
       drawingBoard.close();
     }
     hideLiveTurn();
-    if (source !== "drawing-observation") void loadMediaSuggestions(childTurnText, assistantText);
+    if (source !== "drawing-observation" && !mediaLookupStarted) void loadMediaSuggestions(childTurnText, assistantText);
     stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
     else setStatus("回答完成", "idle");
@@ -1468,10 +1522,14 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
     setBusy(false);
     if (localVoiceHandled) {
       if (pendingMusicCommand) musicStudio?.handleVoiceCommand(pendingMusicCommand);
+      else if (pendingChessCommand) chessBoard?.handleVoiceCommand(pendingChessCommand);
       else if (continuous && conversationActive && !activeRequestController && mediaViewer.openKind !== "video") beginContinuousSegment();
       else if (!activeRequestController) setStatus("爸爸陪着你", "idle");
     }
     if (openRequestedChess) void openChessActivity();
+    if (mediaResumePending && !activeRequestController && mediaViewer.openKind !== "video") {
+      void resumeConversationAfterMedia(mediaPlaybackGeneration);
+    }
   }
 }
 
@@ -1657,6 +1715,7 @@ function pcmToWav(chunks, sampleRate) {
 
 function beginContinuousSegment(initialChunks = [], alreadySpeaking = false) {
   if (!conversationActive || !recordingStream || segmentRecording) return;
+  if (typeof mediaViewer !== "undefined" && mediaViewer.openKind === "video") return;
   if (musicStudio?.opened && !musicStudio.listeningAllowed) return;
   resetListeningLevel();
   stopBargeInMonitor();
@@ -1963,6 +2022,7 @@ function getMusicStudio() {
   if (musicStudio) return musicStudio;
   musicStudio = new MusicStudio({
     onSpeak: speakMusicInstruction,
+    onThemeRequest: prepareMusicTheme,
     onListeningChange: allowed => {
       // A mode change cancels the old explanation before its idle state can listen.
       if (allowed && activeRequestSource === "music-explanation") cancelMusicExplanation();
@@ -1979,6 +2039,7 @@ function getMusicStudio() {
     acquireMicrophone: acquireMusicMicrophone,
     transcribe: transcribeMusicRecording,
     onClose: () => {
+      cancelMusicTheme();
       cancelMusicExplanation();
       if (!pageIsLeaving && musicConversationWasActive && conversationActive && !activeRequestController) beginContinuousSegment();
       else if (!pageIsLeaving && !musicConversationWasActive && (conversationActive || conversationStarting)) stopContinuousConversation();
@@ -1986,6 +2047,61 @@ function getMusicStudio() {
     },
   });
   return musicStudio;
+}
+
+function cancelMusicTheme() {
+  musicThemeController?.abort();
+  musicThemeController = null;
+  if (/^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(musicThemeJobUrl)) {
+    fetch(`${musicThemeJobUrl}/cancel`, {method:"POST", keepalive:true}).catch(() => {});
+  }
+  musicThemeJobUrl = "";
+}
+
+async function prepareMusicTheme(subject, { isCurrent = () => true } = {}) {
+  cancelMusicTheme();
+  if (!musicStudio?.opened || !subject) return;
+  const controller = new AbortController();
+  musicThemeController = controller;
+  const jobId = crypto.randomUUID().replaceAll("-", "");
+  const topic = `${subject}主题的可爱音乐玩具`;
+  musicThemeJobUrl = `/api/image-generation/jobs/${jobId}`;
+  try {
+    const response = await fetch("/api/media/suggestions", {method:"POST", signal:controller.signal,
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({topic,kind:"image",generate_image:true,image_job_id:jobId})});
+    if (controller.signal.aborted || musicThemeController !== controller || !isCurrent()) return;
+    const payload = await response.json();
+    if (controller.signal.aborted || musicThemeController !== controller || !isCurrent()) return;
+    if (!response.ok || payload.topic !== topic) throw new Error("theme_unavailable");
+    let card = payload.cards?.find(item => item.generated && item.topic === topic);
+    const jobUrl = payload.image_generation_job?.status_url;
+    if (!card && /^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(jobUrl || "")) {
+      musicThemeJobUrl = jobUrl;
+      for (let attempt = 0; attempt < 150; attempt++) {
+        if (!await waitForMediaPoll(2000, controller.signal)) return;
+        if (musicThemeController !== controller || !isCurrent()) {
+          if (musicThemeController === controller) cancelMusicTheme();
+          return;
+        }
+        const status = await fetch(jobUrl, {signal:controller.signal});
+        const job = await status.json();
+        if (controller.signal.aborted || musicThemeController !== controller || !isCurrent()) return;
+        if (!status.ok || job.topic !== topic || ["failed","cancelled"].includes(job.status)) break;
+        if (job.status === "completed") { card = job.card; break; }
+      }
+    }
+    if (controller.signal.aborted || musicThemeController !== controller || !musicStudio?.opened || !isCurrent()) return;
+    const url = String(card?.thumbnail_url || "");
+    if (card?.topic === topic && /^\/api\/generated-media\/[0-9a-f]{24}\.png$/.test(url)) return url;
+    throw new Error("theme_unavailable");
+  } catch (_) {
+    if (!controller.signal.aborted && musicThemeController === controller && isCurrent()) throw new Error("theme_unavailable");
+  } finally {
+    if (musicThemeController === controller) {
+      if (!isCurrent() || !musicStudio?.opened) cancelMusicTheme();
+      else { musicThemeController = null; musicThemeJobUrl = ""; }
+    }
+  }
 }
 
 async function openMusicActivity(mode) {
@@ -2117,7 +2233,7 @@ async function openChessActivity() {
   try {
     if (typeof globalThis.ChessBoard !== "function") {
       await Promise.race([
-        import("/chess-board.js?v=20260906-1"),
+        import("/chess-board.js?v=20260910-feedback"),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("chess module timeout")), 5000); }),
       ]);
     }

@@ -121,18 +121,62 @@ class MediaRequest:
     topic: str
     kind: str = "image"
     replay: bool = False
+    generate_image: bool = False
+
+
+def canonical_media_topic(subject: str) -> str:
+    """Only a whole known subject may use the curated encyclopedia search."""
+    value = str(subject or "").strip()
+    aliases = [(alias, topic) for topic, names in TOPIC_ALIASES.items() for alias in names]
+    aliases += [(topic, topic) for topic in EDUCATION_TOPICS]
+    for alias, topic in sorted(aliases, key=lambda pair: (-len(pair[0]), pair[1])):
+        if value in {alias, f"大{alias}", f"小{alias}"}:
+            return topic
+    return ""
+
+
+def normalize_image_subject(subject: str) -> str:
+    """Accept a bounded explicit subject, never a transcript or physical observation.
+
+    Unknown subjects stay intact: a panda riding a bike is not a bike picture.
+    This validates subject data, not permission to generate; callers must first
+    establish an explicit display/drawing request.
+    """
+    value = " ".join(str(subject or "").split())
+    if not value or len(value) > 80:
+        return ""
+    if re.search(r"^(?:再)?(?:看看|看一下|看一看|给我|帮我|打开|放大|展示)|家庭信息|家庭历史|聊天记录|对话历史|原话", value):
+        return ""
+    if re.search(r"(?:我|你|他|她|妈妈|爸爸)(?:说|讲|想|要|的)|为什么|怎么|是不是|有没有|看不到|看得见|手里|眼前|摄像头|镜头|家里的秘密", value):
+        return ""
+    if not re.fullmatch(r"[\w\u3400-\u9fff ·()（）'’-]+", value):
+        return ""
+    value = re.sub(r"^(?:一张|一个|一幅|一只)", "", value)
+    value = re.sub(r"(?:的)?(?:图片|图画|插图|照片|视频|短片|影片|网页|链接|网站|图)$", "", value).strip()
+    if not value or value in {"这个", "那个", "一下", "一眼", "什么", "东西", "衣服玩具", "我", "你", "他", "她"}:
+        return ""
+    if re.search(r"刚才|刚刚|之前|上一张|那张|这张", value):
+        return ""
+    canonical = canonical_media_topic(value)
+    if "照片" in subject and not canonical:
+        return ""  # No claimed private-person photo retrieval from a name.
+    return canonical or value
 
 
 def explicit_media_request(text: str) -> MediaRequest | None:
     """Recognize the child's current request, never rewrite their transcript.
 
-    Search still receives only existing canonical topics. A replay carries no
+    Search receives only exact canonical subjects; generation receives only the
+    explicitly requested subject. A replay carries no
     claimed topic: only the browser knows which card is currently available.
     """
-    normalized = re.sub(r"\s+", "", str(text or ""))[:400].translate(str.maketrans({
+    if len(str(text or "")) > 400:
+        return None
+    normalized = re.sub(r"(?<=[\u3400-\u9fff])\s+|\s+(?=[\u3400-\u9fff])", "", str(text or "").strip()).translate(str.maketrans({
         "圖": "图", "給": "给", "師": "师", "張": "张", "個": "个", "開": "开",
         "剛": "刚", "來": "来", "幫": "帮", "視": "视", "頻": "频", "現": "现",
         "說": "说", "講": "讲", "還": "还", "這": "这", "換": "换", "聽": "听",
+        "畫": "画", "為": "为", "讓": "让",
     }))
     normalized = re.sub(r"“[^”]*”|‘[^’]*’|\"[^\"]*\"", "", normalized)
     request = None
@@ -145,34 +189,33 @@ def explicit_media_request(text: str) -> MediaRequest | None:
             reported = False
         if reported:
             continue
-        clause = re.sub(r"^(?:爸爸老师|爸爸|老师|请|现在|但是|不过|然后|那|能不能|可以|能|帮我)+", "", clause)
-        if re.search(r"不想.{0,5}看|不看|不要看|别看|不用看|不用了|不要了|算了", clause):
+        clause = re.sub(r"^(?:爸爸老师|爸爸|老师|请|现在|但是|不过|然后|那|能不能|可以|能)+", "", clause)
+        if re.search(r"不想|不要|不看|别看|别画|不用|不需要|算了|取消|关闭", clause):
             request = None
             continue
-        if re.search(r"不想|不要|不看|别|不用|不需要|昨天|以前|上次|如果|假如|等会|明天|之后|以后", clause):
-            continue
-        # A later explicit activity request wins over an earlier media clause.
-        if re.match(r"(?:我想|我要|我们|一起|给我|教我|带我)(?:要)?(?:听|学|画|玩|唱|下)", clause):
-            request = None
+        if re.search(r"昨天|以前|上次|如果|假如|等会|明天|之后|以后", clause):
             continue
         match = re.fullmatch(
             r"(?:我(?:想要|想|要)(?:再)?(?:看(?:看|一看|一下)?|看一眼)|"
-            r"(?:再)?给我(?:再)?(?:看(?:看|一看|一下)?|打开|找(?:一张|个)?|展示)|"
-            r"(?:再)?(?:打开|放大|展示|看看|看一下|看一看))(.{1,65}?)(?:好不好|好吗|可以吗|吧|呀|啊|呢|吗)?", clause,
+            r"(?:再)?(?:给我|帮我)(?:再)?(?:看(?:看|一看|一下)?|打开|找(?:一张|个)?|展示)|"
+            r"(?:再)?(?:打开|放大|展示|看看|看一下|看一看))(.{1,90}?)(?:好不好|好吗|可以吗|吧|呀|啊|呢|吗)?", clause,
         )
-        if not match:
+        draw = re.fullmatch(r"(?:(?:给我|请你|你|帮我)|(?:我想请你|我想让你))?(?:画一张|画一个|画一幅|画幅|画出|生成一张|做一张)(.{1,90}?)(?:吧|呀|啊|好吗|可以吗)?", clause)
+        draw = draw or re.fullmatch(r"(?:给我|帮我)(?:画|生成|做)(.{1,90}?)(?:吧|呀|啊|好吗|可以吗)?", clause)
+        draw = draw or re.fullmatch(r"(?:我想要|我要)(?:一张|一个|一幅)?(.{1,90}(?:图片|图画|插图|照片))(?:吧|呀|啊)?", clause)
+        if not (match or draw):
+            if re.match(r"(?:我想|我要|我们|一起|给我|教我|带我)(?:要)?(?:听|学|画|玩|唱|下)", clause):
+                request = None
             continue
-        subject = match.group(1)
+        subject = (match or draw).group(1)
         if re.search(r"(?:我|你|他|她|妈妈|爸爸)(?:说|讲|想|要|的)|为什么|怎么|是不是|有没有|看不到|看得见|手里", subject):
             continue
-        kind = "video" if re.search(r"视频|短片|影片", subject) else "image"
+        kind = "video" if re.search(r"视频|短片|影片", subject) else "link" if re.search(r"网页|链接|网站", subject) else "image"
         if re.fullmatch(r"(?:(?:刚才|刚刚|之前)(?:的)?(?:那|这)?|那|这|上一)(?:一)?(?:张|个)?(?:图片|图画|图|照片|视频|短片|影片)", subject):
             request = MediaRequest("", kind, replay=True)
             continue
-        # Match only the requested subject, preferring e.g. 鲸鱼 over generic 鱼.
-        topic = match_topic(subject)
-        if topic:
-            request = MediaRequest(topic, kind)
+        topic = normalize_image_subject(subject)
+        request = MediaRequest(topic, kind, generate_image=kind == "image") if topic else None
     return request
 
 

@@ -30,7 +30,9 @@ from pydantic import BaseModel, Field
 from avatar.control import StreamingAvatarControl
 from app.image_generation import CodexImageGenerationManager
 from app.repetition import RepeatedQuestionGuard
-from app.media import TrustedMediaSearch, explicit_media_request, match_topic
+from app.model_settings import public_settings, candidate_settings, save_settings, ConfigurationConflict
+from app.media import TrustedMediaSearch, explicit_media_request, match_topic, normalize_image_subject, canonical_media_topic
+from app.web_search import PublicLearningSearch
 from camera.adapter import BrowserCameraAdapter, CameraAdapterError
 from llm.client import LLMError, LLMNotConfiguredError, OpenAICompatibleClient
 from memory.store import DEFAULT_ENABLED_ACTIVITIES, MemoryStore
@@ -82,19 +84,21 @@ if settings.tts_mode == "streaming":
     local_tts = StreamingNathanTTSAdapter(settings)
     tts = local_tts
 llm = OpenAICompatibleClient(settings)
+public_learning_search = PublicLearningSearch()
 camera = BrowserCameraAdapter()
 media_search = TrustedMediaSearch()
-image_generator = CodexImageGenerationManager(
-    enabled=settings.imagegen_enabled,
-    codex_path=settings.imagegen_codex_path,
-    model=settings.imagegen_model,
-    skill_path=settings.imagegen_skill_path,
-    runtime_root=settings.project_root / "runtime",
-    output_dir=settings.imagegen_output_dir,
-    jobs_dir=settings.imagegen_jobs_dir,
-    timeout_seconds=settings.imagegen_timeout_seconds,
-    retry_backoff_seconds=settings.imagegen_retry_backoff_seconds,
-)
+def _build_image_generator(config: Settings) -> CodexImageGenerationManager:
+    api_options = {"provider": "openai", "api_key": config.llm_api_key if config.llm_provider == "openai" else ""} if config.imagegen_provider == "openai" else {}
+    return CodexImageGenerationManager(
+        enabled=config.imagegen_enabled or config.imagegen_provider == "openai",
+        codex_path=config.imagegen_codex_path, model=config.imagegen_model,
+        skill_path=config.imagegen_skill_path, runtime_root=config.project_root / "runtime",
+        output_dir=config.imagegen_output_dir, jobs_dir=config.imagegen_jobs_dir,
+        timeout_seconds=config.imagegen_timeout_seconds,
+        retry_backoff_seconds=config.imagegen_retry_backoff_seconds, **api_options)
+
+
+image_generator = _build_image_generator(settings)
 
 app = FastAPI(title="Family AI Teacher", version="0.3.0")
 logger = logging.getLogger(__name__)
@@ -208,7 +212,8 @@ class TextRequest(BaseModel):
 
 
 class MediaSuggestionRequest(BaseModel):
-    topic: str = Field(min_length=1, max_length=16)
+    topic: str = Field(min_length=1, max_length=80)
+    kind: Literal["image", "video", "link"] = "image"
     generate_image: bool = False
     image_job_id: str = Field(default="", max_length=32, pattern=r"^[0-9a-f]*$")
 
@@ -2665,7 +2670,7 @@ async def health() -> dict[str, Any]:
         "port": settings.app_port,
         "llm_configured": llm.configured,
         "image_generation": "ready" if image_generator.configured else "not_configured",
-        "image_generation_transport": "codex-app-server-stdio" if image_generator.configured else None,
+        "image_generation_transport": getattr(image_generator, "transport", "codex-app-server-stdio") if image_generator.configured else None,
         "stt_ready": stt.ready,
         "stt_runtime": getattr(stt, "runtime_status", None),
         "tts_ready": tts.ready,
@@ -2706,18 +2711,85 @@ async def get_child_profile() -> dict[str, Any]:
     return _profile_for_client(memory.get_child_profile())
 
 
+def _require_local_settings_request(request: Request) -> None:
+    from urllib.parse import urlsplit
+    if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise HTTPException(status_code=403, detail="请从本机爸爸老师打开设置")
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+        raise HTTPException(status_code=403, detail="设置只接受本机同源页面操作")
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        raise HTTPException(status_code=403, detail="不接受跨站设置请求")
+
+
+@app.get("/api/parent/models")
+async def parent_models(request: Request) -> dict[str, Any]:
+    _require_local_settings_request(request)
+    return public_settings(settings, settings.project_root / ".env")
+
+
+@app.post("/api/parent/models/test")
+async def test_parent_models(request: Request) -> dict[str, Any]:
+    _require_local_settings_request(request)
+    try:
+        values = await request.json()
+        if not isinstance(values, dict):
+            raise ValueError("设置格式无效")
+        candidate = candidate_settings(settings, values)
+        client = OpenAICompatibleClient(candidate)
+        # A model list does not prove this particular model can answer.
+        result = await asyncio.to_thread(client.chat, [{"role": "user", "content": "只回复：连接成功"}], 40)
+        return {"ok": True, "model": candidate.llm_model, "latency_s": result.elapsed_s}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except (LLMError, LLMNotConfiguredError):
+        raise HTTPException(status_code=502, detail="连接测试失败，请检查地址、密钥、模型权限和网络") from None
+
+
+@app.post("/api/parent/models")
+async def update_parent_models(request: Request) -> dict[str, Any]:
+    global settings, llm, image_generator
+    _require_local_settings_request(request)
+    try:
+        values = await request.json()
+        if not isinstance(values, dict):
+            raise ValueError("设置格式无效")
+        candidate = candidate_settings(settings, values)
+        image_changed = candidate.imagegen_provider != settings.imagegen_provider or (
+            candidate.imagegen_provider == "openai" and candidate.llm_api_key != settings.llm_api_key)
+        next_generator = _build_image_generator(candidate) if image_changed else None
+        settings = save_settings(settings, values, settings.project_root / ".env")
+        llm = OpenAICompatibleClient(settings)
+        if next_generator is not None:
+            previous_generator, image_generator = image_generator, next_generator
+            await asyncio.to_thread(previous_generator.shutdown)
+    except ConfigurationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=500, detail="本机设置保存失败，原配置仍保留") from None
+    return {"ok": True, **public_settings(settings, settings.project_root / ".env")}
+
+
 @app.post("/api/media/suggestions")
 async def media_suggestions(
     request: MediaSuggestionRequest,
 ) -> dict[str, Any]:
-    """Return learning cards for a client-canonicalized allowlisted topic."""
-    topic = request.topic.strip()
-    if not topic or match_topic(topic) != topic:
-        raise HTTPException(status_code=422, detail="topic must be one canonical educational topic")
-    result = await asyncio.to_thread(media_search.search, topic)
-    if not request.generate_image:
+    """The explicit media subject is sent, without family context or raw media."""
+    topic = normalize_image_subject(request.topic)
+    if not topic or topic != request.topic.strip():
+        raise HTTPException(status_code=422, detail="请提供明确的图片或学习资料主题")
+    if _blocked_content_topic(topic, memory.get_child_profile()):
+        raise HTTPException(status_code=422, detail="这个主题不在当前家庭允许的内容中")
+    if request.kind != "image":
+        return await asyncio.to_thread(public_learning_search.search, topic, request.kind, settings)
+    generation = image_generator.request(topic, request.image_job_id) if request.generate_image else None
+    # Start generation first, while a fast known-subject image lookup runs independently.
+    result = await asyncio.to_thread(media_search.search, topic) if canonical_media_topic(topic) else {
+        "topic": topic, "cards": [], "online_search": False, "reason": "no_suitable_result"}
+    if generation is None:
         return result
-    generation = image_generator.request(topic, request.image_job_id)
     result["image_generation"] = generation["status"]
     if generation["status"] in {"queued", "running"}:
         result["image_generation_job"] = generation
