@@ -19,6 +19,7 @@ test("a later media topic aborts and rejects an older result even when it return
   const requests = [], groups = [], renders = [];
   const context = vm.createContext({
     AbortController,
+    chooseMediaSuggestion: (await import("../frontend/media-intent.js")).chooseMediaSuggestion,
     mediaSuggestionRequestController: null,
     mediaSuggestionGeneration: 0,
     mediaSuggestionJobStatusUrl: "",
@@ -65,6 +66,7 @@ test("generated image polling stays async and adds only the current topic result
   const jobId = "aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
   const context = vm.createContext({
     AbortController,
+    chooseMediaSuggestion: (await import("../frontend/media-intent.js")).chooseMediaSuggestion,
     mediaSuggestionRequestController: null,
     mediaSuggestionGeneration: 0,
     mediaSuggestionJobStatusUrl: "",
@@ -96,10 +98,11 @@ test("generated image polling stays async and adds only the current topic result
   assert.equal(requests.at(-1).url, "auto-open");
 });
 
-test("an ordinary text-only educational mention keeps trusted media without generating", async () => {
+test("an ordinary text-only mention does not open or fetch pictures", async () => {
   const groups = [], requests = [];
   const context = vm.createContext({
     AbortController,
+    chooseMediaSuggestion: (await import("../frontend/media-intent.js")).chooseMediaSuggestion,
     mediaSuggestionRequestController: null,
     mediaSuggestionGeneration: 0,
     mediaSuggestionJobStatusUrl: "",
@@ -117,14 +120,14 @@ test("an ordinary text-only educational mention keeps trusted media without gene
   });
   vm.runInContext(implementation, context);
   await context.loadMediaSuggestions("蝴蝶有几只翅膀", "蝴蝶通常有两对翅膀。 ");
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].options.body, JSON.stringify({ topic: "蝴蝶", generate_image: false, image_job_id: "" }));
+  assert.equal(requests.length, 0);
 });
 
 test("a child request or teacher visual teaching cue can generate an image", async () => {
   const requests = [];
   const context = vm.createContext({
     AbortController,
+    chooseMediaSuggestion: (await import("../frontend/media-intent.js")).chooseMediaSuggestion,
     mediaSuggestionRequestController: null,
     mediaSuggestionGeneration: 0,
     mediaSuggestionJobStatusUrl: "",

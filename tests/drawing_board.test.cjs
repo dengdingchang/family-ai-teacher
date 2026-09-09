@@ -188,10 +188,11 @@ class FakeElement {
   remove() { this.isConnected = false; }
 }
 function boardFixture(options = {}) {
-  const doc = { bounds: { width: 1000, height: 600 }, hidden: false, fullscreenElement: null };
+  const doc = { bounds: { width: 1000, height: 600 }, viewportWidth: 1000, hidden: false, fullscreenElement: null };
   const events = new FakeElement("document", doc), windowEvents = new FakeElement("window", doc);
   doc.addEventListener = events.addEventListener.bind(events); doc.removeEventListener = events.removeEventListener.bind(events);
-  doc.defaultView = { addEventListener: windowEvents.addEventListener.bind(windowEvents), removeEventListener: windowEvents.removeEventListener.bind(windowEvents) };
+  doc.defaultView = { addEventListener: windowEvents.addEventListener.bind(windowEvents), removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
+    matchMedia: () => ({ matches: doc.viewportWidth <= 480 }) };
   doc.body = new FakeElement("body", doc); doc.body.style.overflow = "auto";
   doc.activeElement = new FakeElement("button", doc); const initialFocus = doc.activeElement;
   const made = []; doc.createElement = tag => { const el = new FakeElement(tag, doc); made.push(el); return el; };
@@ -268,4 +269,32 @@ test("native fullscreen rejection keeps a usable overlay, and talk uses only the
   f.byText("和爸爸说话").dispatch("click"); await tick(); assert.equal(talked, 1);
   f.board.setVoiceState("listening"); assert.equal(f.byText("暂停说话").getAttribute("aria-pressed"), "true");
   f.board.destroy();
+});
+
+test("small screens expand and fold brush tools without changing the drawing; desktop tools stay directly available", async () => {
+  const f = boardFixture(); f.doc.viewportWidth = 320; f.board.open();
+  const panel = f.made.find(node => node.className === "drawing-board__advanced-tools");
+  const toggle = f.byText("画笔工具 ▾");
+  try {
+    assert.equal(toggle.hidden, false); assert.equal(panel.hidden, true);
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(f.made.filter(node => node.className?.includes("drawing-board__swatch")).length, 6);
+    assert.equal(f.byText("移动就画：关").hidden, false);
+    f.canvas.dispatch("pointerdown"); f.canvas.dispatch("pointerup");
+    const revision = f.board.revision, width = f.canvas.width, height = f.canvas.height;
+    toggle.dispatch("click"); assert.equal(panel.hidden, false); assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    f.byText("粗").dispatch("click"); assert.equal(f.byText("粗").getAttribute("aria-pressed"), "true");
+    toggle.dispatch("click"); assert.equal(panel.hidden, true);
+    assert.equal(f.board.revision, revision); assert.equal(f.canvas.width, width); assert.equal(f.canvas.height, height);
+    assert.ok(await f.board.getSnapshot());
+    toggle.focus(); f.events.dispatch("keydown", { key: "Tab" });
+    assert.equal(f.doc.activeElement, f.byText("← 返回"));
+    f.doc.viewportWidth = 1400; f.windowEvents.dispatch("resize");
+    assert.equal(toggle.hidden, true); assert.equal(panel.hidden, false);
+    f.byText("粗").focus(); f.doc.viewportWidth = 320; f.windowEvents.dispatch("resize");
+    assert.equal(panel.hidden, true); assert.equal(f.doc.activeElement, toggle, "shrinking does not leave focus inside hidden tools");
+    toggle.dispatch("click"); f.board.close(); f.board.open();
+    assert.equal(panel.hidden, true, "a new visit starts with more room for the drawing");
+    assert.equal(f.board.revision, revision); assert.ok(await f.board.getSnapshot());
+  } finally { f.board.destroy(); }
 });

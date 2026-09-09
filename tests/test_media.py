@@ -3,6 +3,7 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+import pytest
 
 from app.media import TrustedMediaSearch, match_topic, trusted_https_url
 
@@ -98,3 +99,46 @@ def test_search_rejects_non_exact_results_and_reports_source_failure_without_fak
     unsupported = TrustedMediaSearch(lambda _: {}).search("小明的照片")
     assert unsupported["topic"] == ""
     assert unsupported["reason"] == "unsupported_topic"
+
+
+@pytest.mark.parametrize("topic", ["鲸鱼", "鲨鱼", "太阳系"])
+def test_specific_canonical_topic_wins_over_substring(topic):
+    assert match_topic(f"我想看{topic}的图片") == topic
+    assert match_topic(topic) == topic
+
+
+@pytest.mark.parametrize("candidate,expected", [
+    ({"source": "https://upload.wikimedia.org/large.jpg", "width": 1280, "height": 900}, "large.jpg"),
+    ({"source": "https://evil.example/large.jpg", "width": 1280, "height": 900}, "small.jpg"),
+    ({"source": "https://upload.wikimedia.org/huge.jpg", "width": 9000, "height": 5000}, "small.jpg"),
+    ({"source": "https://upload.wikimedia.org/unknown.jpg"}, "small.jpg"),
+])
+def test_display_uses_bounded_official_thumbnail_or_existing_fallback(candidate, expected):
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        if "/w/api.php?" in url:
+            query = parse_qs(urlparse(url).query)
+            assert query["prop"] == ["pageimages"]
+            assert query["titles"] == ["月球"]
+            assert query["pithumbsize"] == ["1280"]
+            return {"query": {"pages": [{"title": "月球", "thumbnail": candidate}]}}
+        return {
+            "title": "月球", "thumbnail": {"source": "https://upload.wikimedia.org/small.jpg", "width": 320, "height": 240},
+            "originalimage": {"source": "https://upload.wikimedia.org/unbounded.jpg", "width": 9000, "height": 9000},
+            "content_urls": {"desktop": {"page": "https://zh.wikipedia.org/wiki/月球"}},
+        }
+    result = TrustedMediaSearch(fetch).search("月亮")
+    assert len(calls) == 2
+    assert result["cards"][0]["thumbnail_url"].endswith(expected)
+
+
+def test_large_thumbnail_request_failure_preserves_verified_small_image():
+    def fetch(url):
+        if "/w/api.php?" in url:
+            raise httpx.ConnectTimeout("temporary thumbnail timeout")
+        return {"title": "月球", "thumbnail": {"source": "https://upload.wikimedia.org/small.jpg", "width": 320, "height": 240},
+                "content_urls": {"desktop": {"page": "https://zh.wikipedia.org/wiki/月球"}}}
+    result = TrustedMediaSearch(fetch).search("月亮")
+    assert result["cards"][0]["thumbnail_url"].endswith("small.jpg")
+    assert result["reason"] == ""

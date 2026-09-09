@@ -10,6 +10,7 @@ function conversation(overrides = {}) {
   const c = vm.createContext({
     activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
     activeRequestSource: '', drawingBoard: null, queueGeneration: 1,
+    musicStudio: null, mediaViewer: { handleVoiceCommand: () => false, close() {} },
     conversationActive: true, segmentRecording: true, segmentShouldSend: true, segmentPcmChunks: [1],
     avatarReady: false, AbortController, FormData, Blob, DOMException,
     globalThis: { crypto: { randomUUID: () => 'visual-regression' }, familyInteractionClock: {
@@ -49,6 +50,47 @@ test('a photo reply pauses an already-open microphone and resumes it for the nex
   assert.equal(voice.ok, true);
   assert.equal(f.calls.filter(x => x === 'listen').length, 2);
   assert.equal(f.requests.filter(x => x.url.endsWith('/complete')).length, 2);
+});
+
+test('a spoken picture replay consumes the UI command without old activity audio or completion', async () => {
+  const viewed = [];
+  const f = conversation({
+    mediaViewer: { openKind: 'image', handleVoiceCommand(text) { viewed.push(text); return true; }, close() { throw new Error('must preserve requested picture'); } },
+    consumeSse: async (_response, emit) => {
+      emit({ event: 'user_text', text: '爸爸老师，再看刚才的图片' });
+      emit({ event: 'audio' });
+      emit({ event: 'done', assistant_text: '你找到红色了吗', commit_required: true, ok: true });
+    },
+  });
+  const result = await f.c.sendStreamingRequest({ endpoint: '/api/conversation/stream', body: new FormData() });
+  assert.equal(result.localCommand, true);
+  assert.deepEqual(viewed, ['爸爸老师，再看刚才的图片']);
+  assert.equal(f.calls.includes('audio'), false);
+  assert.equal(f.requests.some(r => r.url.endsWith('/complete')), false);
+  assert.equal(f.requests.some(r => r.url.endsWith('/cancel')), true);
+  assert.equal(f.c.activeRequestController, null);
+  assert.equal(f.calls.at(-1), 'listen');
+});
+
+test('music voice commands release the STT request before arranging real narration and notes', async () => {
+  const f = conversation({
+    parseMusicVoiceCommand: text => text === '慢一点' ? 'slower' : '',
+    consumeSse: async (_response, emit) => {
+      emit({ event: 'user_text', text: '慢一点' });
+      throw new DOMException('cancelled reading', 'AbortError');
+    },
+  });
+  const musicCalls = [];
+  f.c.musicStudio = { opened: true, handleVoiceCommand(text) {
+    assert.equal(f.c.activeRequestController, null);
+    musicCalls.push(text);
+    f.c.activeRequestController = new AbortController(); // music now owns narration
+  } };
+  const result = await f.c.sendStreamingRequest({ endpoint: '/api/conversation/stream', body: new FormData() });
+  assert.equal(result.localCommand, true);
+  assert.deepEqual(musicCalls, ['慢一点']);
+  assert.equal(f.calls.includes('listen'), false, 'music owns the full note tail before listening');
+  assert.ok(f.c.activeRequestController);
 });
 
 test('automatic drawing observation speaks but cannot confirm a child input or commit a history turn', async () => {

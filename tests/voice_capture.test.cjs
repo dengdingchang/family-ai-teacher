@@ -13,6 +13,7 @@ function fixture(sampleRate, barge = false) {
   let now = 100, level = 0;
   const sent = [], calls = [];
   const context = vm.createContext({
+    musicStudio: null,
     Float32Array, Uint8Array, ArrayBuffer, DataView, Blob,
     conversationActive: true, recordingStream: {}, inputAnalyser: {}, inputProcessor: {},
     inputSampleRate: sampleRate, segmentPcmChunks: [], segmentRecording: !barge,

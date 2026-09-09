@@ -76,6 +76,7 @@ test("URL boundary requires HTTPS, an exact allowlisted host suffix, and canonic
   assert.equal(youtubeEmbedUrl("https://www.youtube.com/embed/AcYCMJvdupI"), "");
   assert.equal(youtubeEmbedUrl("https://music.youtube.com/watch?v=AcYCMJvdupI"), "");
   assert.equal(youtubeEmbedUrl("https://youtube.com.evil.example/watch?v=AcYCMJvdupI"), "");
+  assert.equal(youtubeEmbedUrl("/api/generated-media/0123456789abcdef01234567.png"), "");
 });
 
 test("cards append to the conversation and untrusted cards or HTML-like text stay inert", async () => {
@@ -92,26 +93,86 @@ test("cards append to the conversation and untrusted cards or HTML-like text sta
   f.viewer.destroy();
 });
 
-test("image auto-close starts on load, preserves remaining time while paused, and replay resets it", async () => {
+test("image auto-close starts on load for five seconds, cannot freeze under a pointer, and replay resets it", async () => {
   const f = await fixture();
   const [card] = f.viewer.appendCards([{ kind: "image", title: "月亮", url: "https://zh.wikipedia.org/wiki/test", thumbnail_url: "https://upload.wikimedia.org/moon.jpg" }]);
   findAll(card, "button")[0].dispatch("click");
   const overlay = f.viewer.overlay, image = findAll(overlay, "img")[0];
   assert.equal(f.timers.size, 0, "no close countdown exists before the large image loads");
   image.dispatch("load");
-  assert.equal([...f.timers.values()][0].ms, 8000);
+  assert.equal([...f.timers.values()][0].ms, 5000);
   f.setClock(3000); overlay.dispatch("pointerdown");
-  assert.equal(f.timers.size, 0);
+  assert.equal(f.timers.size, 1);
   f.setClock(5000); overlay.dispatch("pointerup");
-  assert.equal([...f.timers.values()][0].ms, 5000, "paused time is not consumed");
-  overlay.dispatch("mouseenter"); assert.equal(f.timers.size, 0);
+  assert.equal([...f.timers.values()][0].ms, 5000);
+  overlay.dispatch("mouseenter"); assert.equal(f.timers.size, 1);
   overlay.dispatch("mouseleave"); assert.equal([...f.timers.values()][0].ms, 5000);
   f.setClock(6000); overlay.dispatch("focusin");
   f.setClock(9000); overlay.dispatch("focusout", { relatedTarget: null });
-  assert.equal([...f.timers.values()][0].ms, 4000);
+  assert.equal([...f.timers.values()][0].ms, 5000, "focus does not stop a voice-first display");
   const replay = findAll(overlay, "button").find(button => button.textContent.includes("再看一次"));
   replay.dispatch("click");
-  assert.equal([...f.timers.values()][0].ms, 8000);
+  assert.equal([...f.timers.values()][0].ms, 5000);
+  [...f.timers.values()][0].fn();
+  assert.equal(f.viewer.overlay, null);
+  f.viewer.destroy();
+});
+
+test("voice can reopen the last image, close it, or ask by its title without hijacking unrelated speech", async () => {
+  const f = await fixture();
+  assert.equal(f.viewer.handleVoiceCommand("爸爸老师，再看一次"), false, "no remembered image");
+  f.viewer.openImage({ kind: "image", title: "蝴蝶", source: "测试来源", url: "https://zh.wikipedia.org/wiki/test", thumbnail_url: "https://upload.wikimedia.org/butterfly.jpg" });
+  assert.match(findAll(f.viewer.overlay, "p").map(node => node.textContent).join(" "), /测试来源/);
+  f.viewer.close();
+  for (const command of ["爸爸老师，再看一次", "爸爸老师，打开刚才的图片", "给我看看蝴蝶的图片", "把图片放大一下", "再看一遍吧", "爸爸老师，再看刚才的图片", "爸爸老师，再给我看刚才的图片", "让我再看看"]) {
+    assert.equal(f.viewer.handleVoiceCommand(command), true, command);
+    assert.equal(f.viewer.openKind, "image");
+    assert.equal(f.viewer.handleVoiceCommand("爸爸老师，把图片关掉"), true);
+    assert.equal(f.viewer.overlay, null);
+  }
+  for (const command of ["不要打开图片", "爸爸刚才说再看一次", "我想看恐龙", "给我看看飞机图片", "爸爸老师给我看看飞机图片", "蝴蝶为什么飞", "我不要再看一次", "小兔子再看一次月亮"]) {
+    assert.equal(f.viewer.handleVoiceCommand(command), false, command);
+    assert.equal(f.viewer.overlay, null);
+  }
+  f.viewer.destroy();
+  assert.equal(f.viewer.reopenLastImage(), false);
+});
+
+test("stale timers and image events cannot close or replace a newer viewer; Escape restores focus", async () => {
+  const f = await fixture();
+  const trigger = f.doc.createElement("button"); f.doc.body.append(trigger); trigger.focus();
+  const card = { kind: "image", title: "月亮", url: "https://zh.wikipedia.org/wiki/test", thumbnail_url: "https://upload.wikimedia.org/moon.jpg" };
+  f.viewer.openImage(card);
+  const oldImage = findAll(f.viewer.overlay, "img")[0]; oldImage.dispatch("load");
+  const oldTimer = [...f.timers.values()][0];
+  f.viewer.reopenLastImage();
+  const current = f.viewer.overlay;
+  oldTimer.fn(); oldImage.dispatch("error");
+  assert.equal(f.viewer.overlay, current);
+  assert.equal(f.timers.size, 0);
+  const image = findAll(current, "img")[0]; image.dispatch("load");
+  assert.equal(f.timers.size, 1);
+  let prevented = false, stopped = false;
+  f.events.get("keydown")({ key: "Escape", preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } });
+  assert.equal(prevented && stopped, true);
+  assert.equal(f.viewer.overlay, null);
+  assert.equal(f.doc.activeElement, trigger);
+  assert.equal(f.timers.size, 0);
+  f.viewer.destroy();
+});
+
+test("images use the active fullscreen host and failed loads are retryable without a permanent overlay", async () => {
+  const f = await fixture();
+  const host = f.doc.createElement("section"); f.doc.body.append(host); f.doc.fullscreenElement = host;
+  f.viewer.openImage({ kind: "image", title: "测试月亮", url: "https://zh.wikipedia.org/wiki/test", thumbnail_url: "https://upload.wikimedia.org/moon.jpg" });
+  assert.equal(f.viewer.overlay.parentElement, host);
+  const overlay = f.viewer.overlay;
+  findAll(overlay, "img")[0].dispatch("error");
+  assert.match(f.viewer.imageStatus.textContent, /暂时没打开/);
+  assert.equal([...f.timers.values()][0].ms, 5000);
+  findAll(overlay, "button").find(button => button.textContent.includes("再看一次")).dispatch("click");
+  assert.notEqual(f.viewer.overlay, overlay);
+  findAll(f.viewer.overlay, "img")[0].dispatch("load");
   [...f.timers.values()][0].fn();
   assert.equal(f.viewer.overlay, null);
   f.viewer.destroy();

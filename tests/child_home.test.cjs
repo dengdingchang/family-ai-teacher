@@ -20,7 +20,7 @@ test("child home keeps one conversation log and a real three-level activity path
   assert.match(html, /data-music-mode="piano"/);
   assert.match(html, /data-music-mode="sing"/);
   assert.doesNotMatch(html, /data-unavailable/);
-  assert.match(app, /import \{ MusicStudio \}/);
+  assert.match(app, /import \{ MusicStudio, parseMusicVoiceCommand \}/);
   assert.match(app, /openMusicActivity\(button\.dataset\.musicMode\)/);
 });
 
@@ -55,9 +55,9 @@ test("music owns the listening segment until its full demo or singing turn close
 
   const speakStart = app.indexOf("async function speakMusicInstruction(");
   const speakEnd = app.indexOf("async function acquireMusicMicrophone(", speakStart);
-  assert.doesNotMatch(app.slice(speakStart, speakEnd), /beginContinuousSegment\(\)/);
+  assert.match(app.slice(speakStart, speakEnd), /musicStudio\.listeningAllowed\)\) beginContinuousSegment\(\)/);
   assert.match(app, /if \(!pageIsLeaving && musicConversationWasActive && conversationActive && !activeRequestController\) beginContinuousSegment\(\)/);
-  assert.match(app, /else if \(!pageIsLeaving && !musicConversationWasActive && conversationActive\) stopContinuousConversation\(\)/);
+  assert.match(app, /else if \(!pageIsLeaving && !musicConversationWasActive && \(conversationActive \|\| conversationStarting\)\) stopContinuousConversation\(\)/);
 });
 
 test("media lookup sends only a local canonical topic and video pauses the conversation", () => {
@@ -65,7 +65,7 @@ test("media lookup sends only a local canonical topic and video pauses the conve
   const mediaEnd = app.indexOf("function renderHistory(", mediaStart);
   const media = app.slice(mediaStart, mediaEnd);
   assert.match(media, /JSON\.stringify\(\{ topic, generate_image: generateImage, image_job_id: imageJobId \}\)/);
-  for (const topic of ["蝴蝶", "火山", "彩虹"]) assert.match(media, new RegExp(`"${topic}"`));
+  for (const topic of ["蝴蝶", "火山", "彩虹"]) assert.ok(read("frontend/media-intent.js").includes(topic));
   assert.doesNotMatch(media, /encodeURIComponent\(text\)|\?topic=/);
   assert.match(media, /signal: controller\.signal/);
   assert.match(media, /generation !== mediaSuggestionGeneration/);

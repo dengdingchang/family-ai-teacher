@@ -7,6 +7,7 @@ export class CallView {
     this.frames = ['dad', 'child'].map(name => [name, surface.querySelector(`.${name}-video .video-frame`)]);
     this.frameHandlers = this.frames.map(([name, frame]) => {
       const handler = event => {
+        if (frame.closest('.avatar-companion')) return;
         if (name === this.primary) return;
         if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
         event.preventDefault();

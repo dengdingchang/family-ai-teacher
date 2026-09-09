@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from avatar.control import StreamingAvatarControl
 from app.image_generation import CodexImageGenerationManager
 from app.repetition import RepeatedQuestionGuard
-from app.media import TrustedMediaSearch, match_topic
+from app.media import TrustedMediaSearch, explicit_media_request, match_topic
 from camera.adapter import BrowserCameraAdapter, CameraAdapterError
 from llm.client import LLMError, LLMNotConfiguredError, OpenAICompatibleClient
 from memory.store import DEFAULT_ENABLED_ACTIVITIES, MemoryStore
@@ -1585,6 +1585,9 @@ def _activity_turn_reply(
     priority = _child_priority_reply(user_text)
     if priority:
         return priority, None
+    media_reply = _media_request_turn(user_text, profile)
+    if media_reply[0]:
+        return media_reply
     reply, transition = _activity_turn_reply_unchecked(user_text, profile, drawing_controls_only=drawing_controls_only)
     subject = str(transition.get("topic", "")) if transition else ""
     if subject and transition and transition.get("activity") == "story":
@@ -1595,6 +1598,25 @@ def _activity_turn_reply(
     # When no local reply exists, guard the request before it reaches fallback.
     if _blocked_content_topic(f"{reply} {subject} {requested}", profile):
         return _content_boundary_alternative(profile)
+    return reply, transition
+
+
+def _media_request_turn(
+    user_text: str,
+    profile: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any] | None]:
+    request = explicit_media_request(user_text)
+    if request is None:
+        return "", None
+    if _blocked_content_topic(request.topic, profile):
+        return _content_boundary_alternative(profile)
+    media_name = "视频" if request.kind == "video" else "图片"
+    # This acknowledges the request, not a successful browser fetch or display.
+    if request.replay:
+        reply = f"我们再看看刚才的{media_name}。"
+    else:
+        reply = f"我们一起找{request.topic}的{media_name}，准备好就给你看。"
+    transition = {"action": "clear"} if _current_activity_state().get("status") == "active" else None
     return reply, transition
 
 
@@ -2178,6 +2200,8 @@ async def _answer_text(text: str, stt_result: Any | None = None) -> dict[str, An
     try:
         assistant_text = _child_priority_reply(clean_text)
         if not assistant_text:
+            assistant_text, activity_transition = _media_request_turn(clean_text, profile)
+        if not assistant_text:
             assistant_text, activity_transition = _parent_activity_acceptance_reply(clean_text, profile)
         if assistant_text:
             parent_message_id = ""
@@ -2313,6 +2337,8 @@ async def _stream_conversation(
         try:
             local_lesson = (_observed_scene_reply(vision_context, profile, visual_source="drawing", drawing_observation=True)
                             if drawing_observation else _child_priority_reply(clean_text))
+            if not local_lesson and not drawing_observation:
+                local_lesson, state["activity_transition"] = _media_request_turn(clean_text, profile)
             if not local_lesson and activity_reply and not drawing_observation:
                 local_lesson, state["activity_transition"] = activity_reply
             if not local_lesson and vision_context and visual_source == "camera":

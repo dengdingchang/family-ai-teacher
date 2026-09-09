@@ -1,23 +1,22 @@
 /* The child home always uses this inline view. It never enters fullscreen. */
-.stage-card.call-view .video-pair { position: relative; display: block; min-height: clamp(220px, 30vw, 300px); }
+.stage-card.call-view { --call-height: clamp(380px, 55vh, 560px); }
+.stage-card.call-view .video-pair { position: relative; display: block; min-height: var(--call-height); }
 .stage-card.call-view .dad-video { display: block; }
-.stage-card.call-view .dad-video .video-frame { aspect-ratio: 16 / 9; max-height: 300px; }
+.stage-card.call-view .dad-video .video-frame { height: var(--call-height); aspect-ratio: auto; max-height: none; }
 .stage-card.call-view .child-video { position: absolute; right: 14px; bottom: 14px; z-index: 5; width: clamp(168px, 22vw, 252px); }
 .stage-card.call-view .child-video .video-frame { aspect-ratio: 4 / 3; max-height: none; cursor: pointer; border: 3px solid var(--paper); box-shadow: 0 4px 20px oklch(0.29 0.031 164 / 0.18); }
 .stage-card.call-view .child-video .camera-toolbar { position: absolute; right: 0; bottom: -54px; }
 .stage-card.call-view[data-call-primary="dad"] .child-video { bottom: 68px; }
 .stage-card.call-view[data-call-primary="child"] .dad-video .video-frame { position: absolute; right: 14px; bottom: 14px; z-index: 6; width: clamp(168px, 22vw, 252px); height: auto; aspect-ratio: 4 / 3; cursor: pointer; border: 3px solid var(--paper); box-shadow: 0 4px 20px oklch(0.29 0.031 164 / 0.18); }
 .stage-card.call-view[data-call-primary="child"] .child-video { position: static; width: auto; }
-.stage-card.call-view[data-call-primary="child"] .child-video .video-frame { aspect-ratio: 16 / 9; max-height: 300px; cursor: default; border: 0; box-shadow: none; }
+.stage-card.call-view[data-call-primary="child"] .child-video .video-frame { height: var(--call-height); aspect-ratio: auto; max-height: none; cursor: default; border: 0; box-shadow: none; }
 .stage-card.call-view[data-call-primary="child"] .child-video .camera-toolbar { right: 12px; bottom: 12px; }
 .stage-card.call-view [role="button"].video-frame:focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 640px) {
-  .stage-card.call-view .video-pair { min-height: clamp(190px, 62vw, 240px); }
-  .stage-card.call-view .dad-video .video-frame, .stage-card.call-view[data-call-primary="child"] .child-video .video-frame { aspect-ratio: 3 / 2; max-height: 240px; }
-  .stage-card.call-view .child-video, .stage-card.call-view[data-call-primary="child"] .dad-video .video-frame { right: 8px; bottom: 8px; width: 168px; }
+  .stage-card.call-view { --call-height: clamp(280px, 43vh, 360px); }
+  .stage-card.call-view .child-video, .stage-card.call-view[data-call-primary="child"] .dad-video .video-frame { right: 8px; bottom: 8px; width: clamp(112px, 32vw, 144px); }
 }
 
 @media (max-width: 370px) {
-  .stage-card.call-view .video-pair { min-height: 190px; }
-  .stage-card.call-view .dad-video .video-frame, .stage-card.call-view[data-call-primary="child"] .child-video .video-frame { aspect-ratio: 3 / 2; max-height: 185px; }
+  .stage-card.call-view { --call-height: 280px; }
 }

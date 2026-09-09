@@ -8,7 +8,24 @@ const NOTES = [
   { id: "G4", label: "索", key: "g", frequency: 392.0 },
 ];
 const DEMO = ["C4", "D4", "E4"];
+const DEMO_GROUPS = [DEMO, ["E4", "D4", "C4"], ["C4", "E4", "G4"], ["D4", "F4", "E4"]];
 const KEY_NOTES = new Map(NOTES.map(note => [note.key, note]));
+
+export function parseMusicVoiceCommand(text) {
+  // Whole commands only: do not turn a question, quotation, or negation into an action.
+  const phrase = String(text || "").normalize("NFKC")
+    .replace(/[\s，,。！!、]/gu, "")
+    .replace(/老師/g, "老师").replace(/示範/g, "示范").replace(/一點/g, "一点")
+    .replace(/換/g, "换").replace(/組/g, "组").replace(/彈/g, "弹").replace(/鋼/g, "钢").replace(/著/g, "着")
+    .replace(/請/g, "请").replace(/幫/g, "帮").replace(/給/g, "给").replace(/聽/g, "听");
+  const command = phrase.replace(/^(?:爸爸老师|爸爸)?(?:请你|请|帮我|给我|我要|我想)?/u, "").replace(/[吧呀啊啦]$/u, "");
+  if (/^(?:再(?:示范|演示|弹)(?:一遍|一次)?|示范(?:一遍|一次)?|再听一遍)$/u.test(command)) return "demo";
+  if (/^(?:慢一点|再慢一点|弹慢一点|示范慢一点)$/u.test(command)) return "slower";
+  if (/^(?:换一组|换一组三个音|换三个音|换一组音符)$/u.test(command)) return "next";
+  if (/^(?:弹钢琴|玩钢琴|切换到钢琴)$/u.test(command)) return "piano";
+  if (/^(?:跟着唱|跟唱|切换到跟唱)$/u.test(command)) return "sing";
+  return "";
+}
 
 export function compareThreeNotes(notes, reference = DEMO) {
   const played = notes.slice(0, reference.length);
@@ -74,18 +91,21 @@ export class MusicStudio {
    * Host contract: onSpeak(text) returns Promise<{ok?: boolean, error?: string}>;
    * acquireMicrophone() returns the application's existing MediaStream;
    * transcribe(blob) returns a string or {text}; onClose() releases host narration.
+   * onListeningChange(allowed) gates the host's ordinary speech recognition.
    */
   constructor({ onSpeak = () => ({ ok: true }), acquireMicrophone = async () => null,
-    transcribe = async () => "", onClose = () => {}, document: doc = globalThis.document,
+    transcribe = async () => "", onClose = () => {}, onListeningChange = () => {}, document: doc = globalThis.document,
     audioContextFactory, MediaRecorder: Recorder = globalThis.MediaRecorder,
     later, cancelLater, now = () => globalThis.performance?.now?.() || Date.now(), recordingMs = 4500 } = {}) {
     if (!doc?.body) throw new Error("Music studio needs a document body");
     this.doc = doc; this.win = doc.defaultView || globalThis;
     this.onSpeak = onSpeak; this.acquireMicrophone = acquireMicrophone; this.transcribe = transcribe; this.onClose = onClose;
+    this.onListeningChange = onListeningChange; this.listeningAllowed = null;
     this.audioContextFactory = audioContextFactory || (() => new (this.win.AudioContext || this.win.webkitAudioContext)());
     this.Recorder = Recorder; this.later = later || ((fn, ms) => this.win.setTimeout(fn, ms));
     this.cancelLater = cancelLater || (handle => this.win.clearTimeout(handle)); this.now = now; this.recordingMs = recordingMs;
     this.opened = false; this.destroyed = false; this.mode = "piano"; this.context = null; this.demoTimers = []; this.demoActive = false;
+    this.demoGroup = 0; this.reference = DEMO; this.demoStepMs = 550; this.tones = new Set();
     this.performance = []; this.recording = null; this.recordingTimer = null; this.generation = 0;
     this._build();
     this._keydown = event => this._onKeydown(event);
@@ -113,10 +133,27 @@ export class MusicStudio {
     this.privacy = this._node("p", "music-studio__privacy", "跟唱只在点“轮到我唱”后短暂使用麦克风，声音不保存。");
     content.append(this.instruction, this.beatTrack, this.keyboard, controls, this.feedback, this.privacy); this.element.append(header, modes, content); this.doc.body.append(this.element); this._render();
   }
-  open() { if (this.destroyed || this.opened) return this; this.opened = true; this.focusBefore = this.doc.activeElement; this.overflowBefore = this.doc.body.style.overflow; this.doc.body.style.overflow = "hidden"; this.element.hidden = false; this._render(); this.back.focus({ preventScroll: true }); return this; }
-  close() { if (!this.opened) return; this.opened = false; this.generation++; this._clearDemo(); this._cancelRecording(); this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore; try { this.onClose(); } finally { if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true }); } }
+  open() { if (this.destroyed || this.opened) return this; this.opened = true; this.focusBefore = this.doc.activeElement; this.overflowBefore = this.doc.body.style.overflow; this.doc.body.style.overflow = "hidden"; this.element.hidden = false; this._render(); this.back.focus({ preventScroll: true }); this._setListeningAllowed(true); return this; }
+  close() { if (!this.opened) return; this.opened = false; this.generation++; this._clearDemo(); this._cancelRecording(); this._setListeningAllowed(false); this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore; try { this.onClose(); } finally { if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true }); } }
   destroy() { this.close(); this.destroyed = true; this.doc.removeEventListener("keydown", this._keydown, true); this.context?.close?.(); this.element.remove(); }
-  setMode(mode) { if (!this.opened || !["piano", "sing"].includes(mode)) return; this.generation++; this._clearDemo(); this._cancelRecording(); this.mode = mode; this.performance = []; this._showBeats(0); this._render(); }
+  setMode(mode) { if (!this.opened || !["piano", "sing"].includes(mode)) return; this.generation++; this._clearDemo(); this._cancelRecording(); this.mode = mode; this.performance = []; this._showBeats(0); this._render(); this._setListeningAllowed(true); }
+  _setListeningAllowed(allowed) {
+    const next = Boolean(allowed && this.opened && !this.destroyed);
+    if (this.listeningAllowed === next) return;
+    this.listeningAllowed = next; this.onListeningChange(next);
+  }
+  // Synchronous handled flag lets the host bypass unrelated chat/old game routing.
+  // These commands never start a recording or acquire another microphone stream.
+  handleVoiceCommand(text) {
+    if (!this.opened || this.destroyed) return false;
+    const command = parseMusicVoiceCommand(text); if (!command) return false;
+    this.generation++; this._cancelRecording();
+    if (command === "piano" || command === "sing") this.setMode(command);
+    if (command === "slower") this.demoStepMs = Math.min(1100, this.demoStepMs + 250);
+    if (command === "next") { this.demoGroup = (this.demoGroup + 1) % DEMO_GROUPS.length; this.reference = DEMO_GROUPS[this.demoGroup]; }
+    void this.demo();
+    return true;
+  }
   _showBeats(done, active = -1) { this.beats.forEach((beat, index) => { beat.className = `music-studio__beat${index < done ? " is-done" : ""}${index === active ? " is-active" : ""}`; }); }
   _render() {
     const piano = this.mode === "piano"; this.pianoButton.setAttribute("aria-pressed", String(piano)); this.singButton.setAttribute("aria-pressed", String(!piano));
@@ -131,13 +168,15 @@ export class MusicStudio {
     if (note) { event.preventDefault(); this.playChildNote(note); }
   }
   _audio() { if (!this.context) this.context = this.audioContextFactory(); this.context.resume?.(); return this.context; }
-  _tone(note) {
+  _tone(note, onEnded) {
     try {
       const context = this._audio(), start = context.currentTime || 0, gain = context.createGain(), oscillator = context.createOscillator();
       oscillator.type = "triangle"; oscillator.frequency.setValueAtTime(note.frequency, start); gain.gain.setValueAtTime(0.0001, start);
       gain.gain.exponentialRampToValueAtTime(0.24, start + 0.015); gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.75);
+      this.tones.add(oscillator); oscillator.onended = () => { this.tones.delete(oscillator); oscillator.disconnect?.(); gain.disconnect?.(); onEnded?.(); };
       oscillator.connect(gain); gain.connect(context.destination); oscillator.start(start); oscillator.stop(start + 0.78);
-    } catch (_) { this.feedback.textContent = "琴音暂时没准备好，可以再点一次。"; }
+      return oscillator;
+    } catch (_) { this.feedback.textContent = "琴音暂时没准备好，可以再点一次。"; return null; }
   }
   _flash(id) { const key = this.keys.get(id); if (!key) return; key.className = "music-studio__button music-studio__key is-playing"; this.demoTimers.push(this.later(() => { if (key.isConnected) key.className = "music-studio__button music-studio__key"; }, 330)); }
   playChildNote(note) {
@@ -145,30 +184,52 @@ export class MusicStudio {
     if (this.mode !== "piano" || demoActive) return;
     this.performance.push({ id: note.id, at: this.now() });
     this._showBeats(this.performance.length);
-    if (this.performance.length === DEMO.length) { const result = compareThreeNotes(this.performance); this.feedback.textContent = result.message; this.performance = []; }
+    if (this.performance.length === this.reference.length) { const result = compareThreeNotes(this.performance, this.reference); this.feedback.textContent = result.message; this.performance = []; }
   }
-  _clearDemo() { for (const timer of this.demoTimers) this.cancelLater(timer); this.demoTimers = []; this.demoActive = false; }
+  _clearDemo() {
+    for (const timer of this.demoTimers) this.cancelLater(timer); this.demoTimers = []; this.demoActive = false;
+    for (const oscillator of this.tones) { try { oscillator.stop(); } catch (_) {} } this.tones.clear();
+    for (const key of this.keys.values()) key.className = "music-studio__button music-studio__key";
+  }
   async demo() {
-    if (!this.opened || this.recording) return; this.performance = []; this._clearDemo(); this.demoActive = true; const token = ++this.generation;
-    const words = this.mode === "sing" ? "爸爸现在只能说口型提示，不能唱歌。跟着哆、来、咪慢慢张嘴，再听三个参考音。" : "听爸爸弹三个音：哆、来、咪。等一等，再轮到你按。";
+    if (!this.opened || this.recording) return; const token = ++this.generation; this.performance = []; this._clearDemo(); this.demoActive = true;
+    this._setListeningAllowed(false);
+    const reference = this.reference, labels = reference.map(id => NOTES.find(note => note.id === id).label).join("、");
+    const words = this.mode === "sing" ? `爸爸现在只能说口型提示，不能唱歌。跟着${labels}慢慢张嘴，再听三个参考音。` : `听爸爸${this.demoStepMs > 550 ? "慢慢" : ""}弹三个音：${labels}。等一等，再轮到你按。`;
     this._showBeats(0, 0); this.feedback.textContent = "爸爸正在示范…";
     try { const result = await this.onSpeak(words); if (token !== this.generation || !this.opened) return; if (result?.ok === false) this.feedback.textContent = result.error || "声音没播完，钢琴示范还可以继续听。"; } catch (_) { if (token === this.generation) this.feedback.textContent = "声音没播出来，钢琴示范还可以继续听。"; }
     if (token !== this.generation || !this.opened) return;
-    for (const [index, id] of DEMO.entries()) this.demoTimers.push(this.later(() => { if (token === this.generation && this.opened) { const note = NOTES.find(item => item.id === id); this._tone(note); this._flash(id); this._showBeats(index + 1, index < DEMO.length - 1 ? index + 1 : -1); if (index === DEMO.length - 1) { this.demoTimers = []; this.demoActive = false; this.feedback.textContent = this.mode === "piano" ? "轮到你啦，照着三个亮点按。" : "这是参考音，不是在判断你唱得准不准。"; } } }, index * 550));
+    const finishDemo = (played = true) => {
+      if (token !== this.generation || !this.opened) return;
+      this.demoActive = false;
+      if (played) this.feedback.textContent = this.mode === "piano" ? "轮到你啦，照着三个亮点按。" : "这是参考音，不是在判断你唱得准不准。";
+      this._setListeningAllowed(true);
+    };
+    for (const [index, id] of reference.entries()) this.demoTimers.push(this.later(() => {
+      if (token !== this.generation || !this.opened) return;
+      const last = index === reference.length - 1, note = NOTES.find(item => item.id === id);
+      // The Web Audio ended event includes the final note's complete release tail.
+      const oscillator = this._tone(note, last ? () => finishDemo() : undefined); this._flash(id);
+      this._showBeats(index + 1, index < reference.length - 1 ? index + 1 : -1);
+      if (last && !oscillator) finishDemo(false);
+    }, index * this.demoStepMs));
   }
   async startSinging() {
     if (!this.opened || this.mode !== "sing" || this.recording) return;
     if (!this.Recorder) { this.feedback.textContent = "这个浏览器不能短暂录音，所以这次没听清。"; return; }
+    const token = ++this.generation; this._clearDemo(); this._setListeningAllowed(false);
     let stream;
     try { stream = await this.acquireMicrophone(); } catch (_) { stream = null; }
-    if (!this.opened || !stream) { this.feedback.textContent = "麦克风暂时没准备好，可以请大人帮忙后再试。"; return; }
+    if (!this.opened || this.mode !== "sing" || token !== this.generation) return;
+    if (!stream) { this.feedback.textContent = "麦克风暂时没准备好，可以请大人帮忙后再试。"; this._setListeningAllowed(true); return; }
     let recorder;
-    try { recorder = new this.Recorder(stream); } catch (_) { this.feedback.textContent = "这次没听清，可以再试一次。"; return; }
-    const token = ++this.generation, chunks = [];
+    try { recorder = new this.Recorder(stream); } catch (_) { this.feedback.textContent = "这次没听清，可以再试一次。"; this._setListeningAllowed(true); return; }
+    const chunks = [];
     this.recording = { recorder, chunks, token }; this._showBeats(0, 0); this.feedback.textContent = "现在轮到你唱，唱完会自己停下来。";
     recorder.addEventListener?.("dataavailable", event => { if (event.data?.size) chunks.push(event.data); });
     recorder.addEventListener?.("stop", () => void this._processRecording(token, recorder, chunks));
-    recorder.start(); this.recordingTimer = this.later(() => this._finishRecording(), this.recordingMs);
+    try { recorder.start(); this.recordingTimer = this.later(() => this._finishRecording(), this.recordingMs); }
+    catch (_) { this._cancelRecording(); this.feedback.textContent = "这次没听清，可以再试一次。"; if (this.opened && token === this.generation) this._setListeningAllowed(true); }
   }
   _finishRecording() { if (this.recordingTimer !== null) { this.cancelLater(this.recordingTimer); this.recordingTimer = null; } const recorder = this.recording?.recorder; if (recorder && recorder.state !== "inactive") { try { recorder.stop(); } catch (_) {} } }
   _cancelRecording() {
@@ -193,10 +254,14 @@ export class MusicStudio {
       const wordsText = text ? `听到的歌词：“${text.slice(0, 80)}”。发音这次没有评估。` : "听到的歌词：这次没听清。发音这次没有评估。";
       this.feedback.textContent = `${pitchText}${rhythmText}${wordsText}`;
     } catch (_) { if (this.opened && token === this.generation) this.feedback.textContent = "音高：这次没听清。节奏：这次没听清。听到的歌词：这次没听清。发音这次没有评估。"; }
-    finally { /* blob and recorder chunks are released after this turn; shared stream tracks stay untouched. */ }
+    finally {
+      // Stale analysis must not reopen listening during a newer demonstration or after close.
+      if (this.opened && token === this.generation && this.mode === "sing") this._setListeningAllowed(true);
+      /* blob and recorder chunks are released after this turn; shared stream tracks stay untouched. */
+    }
   }
   async _analyseBlob(blob) {
-    try { const context = this._audio(), data = await blob.arrayBuffer(), decoded = await context.decodeAudioData(data); return analyseSingingSamples(decoded.getChannelData(0), decoded.sampleRate); }
+    try { const reference = this.reference, context = this._audio(), data = await blob.arrayBuffer(), decoded = await context.decodeAudioData(data); return analyseSingingSamples(decoded.getChannelData(0), decoded.sampleRate, reference); }
     catch (_) { return { heard: false, pitch: null, rhythm: null }; }
   }
 }

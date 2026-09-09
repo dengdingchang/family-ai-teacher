@@ -1,0 +1,29 @@
+.avatar-companion { position: fixed; z-index: 20000; overflow: hidden; border: 2px solid var(--paper, oklch(.992 .006 95)); border-radius: 18px; background: var(--paper, oklch(.992 .006 95)); box-shadow: 0 5px 24px oklch(.29 .031 164 / .2); color: var(--ink, oklch(.29 .031 164)); }
+.avatar-companion[hidden] { display: none; }
+.avatar-companion button { min-width: 48px; min-height: 48px; border: 0; border-radius: 0; color: inherit; background: transparent; font: 600 16px "Segoe UI", "Microsoft YaHei", sans-serif; cursor: pointer; }
+.avatar-companion button:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.avatar-companion__move { width: 100%; cursor: grab !important; touch-action: none; }
+.avatar-companion__body { aspect-ratio: 4 / 3; position: relative; }
+.avatar-companion .video-frame { position: absolute; inset: 0; height: 100%; width: 100%; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; background: oklch(.84 .024 80); }
+.avatar-companion #avatarImage, .avatar-companion #avatarIdle, .avatar-companion #avatarCanvas { position: absolute; width: 100%; height: 100%; inset: 0; object-fit: contain; }
+.avatar-companion .frame-label { display: none; }
+.avatar-companion .voice-bars { transform: scale(.7); transform-origin: right bottom; }
+.avatar-companion:is([data-state="speaking"],[data-state="listening"]) .voice-bars { opacity: 1; }
+.avatar-companion[data-state="speaking"] .voice-bars i { animation: voice-state 700ms ease-in-out infinite alternate; }
+.avatar-companion[data-state="speaking"] .voice-bars i:nth-child(2n) { animation-delay: -300ms; }
+.avatar-companion[data-state="speaking"] .voice-bars i:nth-child(3n) { animation-delay: -500ms; }
+.avatar-companion[data-state="listening"] .voice-bars i { transform: scaleY(calc(.3 + .7 * var(--listening-level, 0))); }
+@media (prefers-reduced-motion: reduce) {
+  .avatar-companion[data-state="listening"] .voice-bars i { transform: scaleY(.3); }
+}
+.avatar-companion__tools { display: flex; justify-content: space-around; }
+.avatar-companion__tools button { flex: 1; }
+.avatar-companion__tools button:last-child { touch-action: none; cursor: nwse-resize; }
+.media-viewer.has-avatar-companion .media-viewer__close { left: max(16px, env(safe-area-inset-left)); right: auto; }
+@media (max-width: 640px) {
+  .has-avatar-companion > .music-studio__header,
+  .has-avatar-companion > .chess-board__header,
+  .has-avatar-companion > .drawing-board__header { min-height: 216px; padding-right: 168px; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+  .has-avatar-companion .music-studio__heading p,
+  .has-avatar-companion .drawing-board__heading p { display: none; }
+}

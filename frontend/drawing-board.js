@@ -119,7 +119,9 @@
     const heading = element("div", "drawing-board__heading");
     heading.append(element("h2", "", "我的画板"), element("p", "", "爸爸老师能看到这张画"));
     const talk = button("和爸爸说话", () => {
-      Promise.resolve().then(() => onTalk()).catch(() => { voiceStatus.textContent = "声音还没准备好，请再试一次"; });
+      Promise.resolve().then(() => onTalk()).catch(() => {
+        voiceStatus.setAttribute("data-state", "error"); voiceStatus.textContent = "声音还没准备好，请再试一次";
+      });
     }, "drawing-board__talk");
     talk.setAttribute("aria-pressed", "false");
     const pause = button("暂停观察", () => {
@@ -160,7 +162,11 @@
       operations.push({ clear: true }); redraw(); changed();
       status.textContent = "画纸清空了，点撤销还能找回来";
     });
-    tools.append(palette, sizes, eraser, undo, clear);
+    const advancedTools = element("div", "drawing-board__advanced-tools");
+    advancedTools.setAttribute("role", "group"); advancedTools.setAttribute("aria-label", "更多画笔工具");
+    advancedTools.append(sizes, eraser, undo, clear);
+    const advancedControls = [...sizeButtons, eraser, undo, clear];
+    tools.append(palette, advancedTools);
     const lower = element("div", "drawing-board__lower");
     const mode = button("移动就画：关", () => {
       finishStroke(); hover = !hover; mode.setAttribute("aria-pressed", String(hover));
@@ -168,12 +174,17 @@
       hint.textContent = hover ? "鼠标移到画纸上，就能画画" : "按住鼠标拖一拖，或用手指画画";
     }, "drawing-board__mode");
     mode.setAttribute("aria-pressed", "false");
+    let toolsExpanded = false;
+    const toolsToggle = button("画笔工具 ▾", () => {
+      finishStroke(); toolsExpanded = !toolsExpanded; refreshToolsLayout(); resize();
+    }, "drawing-board__tools-toggle");
+    toolsToggle.setAttribute("aria-expanded", "false");
     const hint = element("span", "drawing-board__hint", "按住鼠标拖一拖，或用手指画画");
     const status = element("span", "drawing-board__status");
     status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
     const voiceStatus = element("span", "drawing-board__voice", "点和爸爸说话，也能聊你的画");
-    voiceStatus.setAttribute("role", "status");
-    lower.append(mode, hint, status, voiceStatus);
+    voiceStatus.setAttribute("role", "status"); voiceStatus.setAttribute("data-state", "paused");
+    lower.append(mode, toolsToggle, hint, status, voiceStatus);
     const feedback = element("p", "drawing-board__feedback");
     feedback.setAttribute("aria-live", "polite");
     footer.append(tools, lower, feedback); board.append(header, stage, footer); doc.body.append(board);
@@ -203,6 +214,15 @@
       sizeButtons.forEach((control, index) => control.setAttribute("aria-pressed", String(width === [4, 10, 22][index])));
       eraser.setAttribute("aria-pressed", String(erasing));
       undo.disabled = operations.length === 0; clear.disabled = !hasDrawing();
+    }
+    function refreshToolsLayout() {
+      const compact = Boolean(win.matchMedia?.("(max-width: 480px)")?.matches);
+      toolsToggle.hidden = !compact;
+      advancedTools.hidden = compact && !toolsExpanded;
+      toolsToggle.setAttribute("aria-expanded", String(!advancedTools.hidden));
+      toolsToggle.textContent = toolsExpanded ? "收起工具 ▴" : "画笔工具 ▾";
+      if (opened && advancedTools.hidden && advancedControls.includes(doc.activeElement)) toolsToggle.focus();
+      if (opened && toolsToggle.hidden && doc.activeElement === toolsToggle) mode.focus();
     }
     function refreshObservation() {
       pause.setAttribute("aria-pressed", String(!observation.enabled));
@@ -234,6 +254,7 @@
     }
     function resize() {
       if (!opened) return;
+      refreshToolsLayout();
       const bounds = stage.getBoundingClientRect();
       if (!bounds.width || !bounds.height) return;
       if (!initialized) {
@@ -300,6 +321,7 @@
       const labels = { listening: "爸爸老师在听你说", paused: "点和爸爸说话，也能聊你的画",
         thinking: "爸爸老师在想一想", speaking: "爸爸老师正在说话" };
       voiceStatus.textContent = labels[state] || labels.paused;
+      voiceStatus.setAttribute("data-state", labels[state] ? state : "paused");
       talk.textContent = state === "listening" ? "暂停说话" : "和爸爸说话";
       talk.setAttribute("aria-pressed", String(state === "listening")); return true;
     }
@@ -326,7 +348,7 @@
     }
     function open() {
       if (destroyed || opened) return api;
-      opened = true; focusBefore = doc.activeElement; overflowBefore = doc.body.style.overflow;
+      opened = true; toolsExpanded = false; focusBefore = doc.activeElement; overflowBefore = doc.body.style.overflow;
       doc.body.style.overflow = "hidden"; board.hidden = false;
       observation.setEnabled(true); observation.setVisible(!doc.hidden); observation.setActive(true);
       refreshObservation(); refreshTools(); resize(); back.focus({ preventScroll: true });
@@ -356,7 +378,8 @@
       if (!opened) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
       else if (event.key === "Tab") {
-        const controls = [...board.querySelectorAll("button")].filter(control => !control.disabled && !control.hidden);
+        const controls = [...board.querySelectorAll("button")].filter(control => !control.disabled && !control.hidden
+          && (!advancedTools.hidden || !advancedControls.includes(control)));
         const first = controls[0], last = controls.at(-1);
         if (event.shiftKey && doc.activeElement === first) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && doc.activeElement === last) { event.preventDefault(); first.focus(); }
@@ -383,7 +406,7 @@
         doc.removeEventListener("fullscreenchange", fullscreen); win.removeEventListener("resize", resize); board.remove();
       },
     };
-    refreshTools(); return api;
+    refreshTools(); refreshToolsLayout(); return api;
   }
   root.createDrawingBoard = createDrawingBoard;
   if (typeof module !== "undefined" && module.exports) module.exports = { createDrawingBoard, DrawingObservationQueue };

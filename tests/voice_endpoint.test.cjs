@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../frontend/app.js'), 'utf8');
 const implementation = source.slice(source.indexOf('function stopVadLoop()'),
-  source.indexOf('async function startContinuousConversation()'));
+  source.indexOf('async function startContinuousConversation('));
 const stop = source.slice(source.indexOf('function stopContinuousConversation()'),
   source.indexOf('recordButton.addEventListener('));
 const configured = Object.fromEntries(['VAD_INTERVAL_MS', 'VAD_START_RMS', 'VAD_STOP_RMS',
@@ -18,6 +18,7 @@ function fixture(parameters = configured) {
   const origin = 1000, timers = new Map(), sent = [];
   let now = origin, nextId = 1, level = 0;
   const context = vm.createContext({
+    musicStudio: null,
     ...parameters, Blob, ArrayBuffer, DataView, Float32Array, Uint8Array,
     conversationActive: true, recordingStream: { getTracks: () => [] }, inputAnalyser: {},
     inputProcessor: null, inputMuteGain: null, inputSource: null, inputSampleRate: 16000,

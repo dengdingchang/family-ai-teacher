@@ -7,6 +7,7 @@ profile data, camera frames, and generated prompts never enter this service.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import re
 from typing import Any, Callable
 from urllib.parse import quote, urlencode, urlparse
 
@@ -109,13 +110,70 @@ def trusted_https_url(value: Any) -> str:
 
 def match_topic(query: str) -> str:
     normalized = "".join(str(query or "").casefold().split())[:160]
-    for topic, aliases in TOPIC_ALIASES.items():
-        if any(alias.casefold() in normalized for alias in aliases):
-            return topic
-    for topic in EDUCATION_TOPICS:
-        if topic.casefold() in normalized:
-            return topic
-    return ""
+    candidates = [(len(alias), topic) for topic, aliases in TOPIC_ALIASES.items()
+                  for alias in aliases if alias.casefold() in normalized]
+    candidates += [(len(topic), topic) for topic in EDUCATION_TOPICS if topic.casefold() in normalized]
+    return max(candidates, default=(0, ""))[1]
+
+
+@dataclass(frozen=True)
+class MediaRequest:
+    topic: str
+    kind: str = "image"
+    replay: bool = False
+
+
+def explicit_media_request(text: str) -> MediaRequest | None:
+    """Recognize the child's current request, never rewrite their transcript.
+
+    Search still receives only existing canonical topics. A replay carries no
+    claimed topic: only the browser knows which card is currently available.
+    """
+    normalized = re.sub(r"\s+", "", str(text or ""))[:400].translate(str.maketrans({
+        "圖": "图", "給": "给", "師": "师", "張": "张", "個": "个", "開": "开",
+        "剛": "刚", "來": "来", "幫": "帮", "視": "视", "頻": "频", "現": "现",
+        "說": "说", "講": "讲", "還": "还", "這": "这", "換": "换", "聽": "听",
+    }))
+    normalized = re.sub(r"“[^”]*”|‘[^’]*’|\"[^\"]*\"", "", normalized)
+    request = None
+    reported = False
+    for clause in re.split(r"[，,。！？!?；;]", normalized):
+        if re.search(r"(?:说|讲|问)(?:过|了)?[：:]?$", clause):
+            reported = True
+            continue
+        if clause.startswith(("但是", "不过", "现在")):
+            reported = False
+        if reported:
+            continue
+        clause = re.sub(r"^(?:爸爸老师|爸爸|老师|请|现在|但是|不过|然后|那|能不能|可以|能|帮我)+", "", clause)
+        if re.search(r"不想.{0,5}看|不看|不要看|别看|不用看|不用了|不要了|算了", clause):
+            request = None
+            continue
+        if re.search(r"不想|不要|不看|别|不用|不需要|昨天|以前|上次|如果|假如|等会|明天|之后|以后", clause):
+            continue
+        # A later explicit activity request wins over an earlier media clause.
+        if re.match(r"(?:我想|我要|我们|一起|给我|教我|带我)(?:要)?(?:听|学|画|玩|唱|下)", clause):
+            request = None
+            continue
+        match = re.fullmatch(
+            r"(?:我(?:想要|想|要)(?:再)?(?:看(?:看|一看|一下)?|看一眼)|"
+            r"(?:再)?给我(?:再)?(?:看(?:看|一看|一下)?|打开|找(?:一张|个)?|展示)|"
+            r"(?:再)?(?:打开|放大|展示|看看|看一下|看一看))(.{1,65}?)(?:好不好|好吗|可以吗|吧|呀|啊|呢|吗)?", clause,
+        )
+        if not match:
+            continue
+        subject = match.group(1)
+        if re.search(r"(?:我|你|他|她|妈妈|爸爸)(?:说|讲|想|要|的)|为什么|怎么|是不是|有没有|看不到|看得见|手里", subject):
+            continue
+        kind = "video" if re.search(r"视频|短片|影片", subject) else "image"
+        if re.fullmatch(r"(?:(?:刚才|刚刚|之前)(?:的)?(?:那|这)?|那|这|上一)(?:一)?(?:张|个)?(?:图片|图画|图|照片|视频|短片|影片)", subject):
+            request = MediaRequest("", kind, replay=True)
+            continue
+        # Match only the requested subject, preferring e.g. 鲸鱼 over generic 鱼.
+        topic = match_topic(subject)
+        if topic:
+            request = MediaRequest(topic, kind)
+    return request
 
 
 class TrustedMediaSearch:
@@ -126,7 +184,7 @@ class TrustedMediaSearch:
     def _fetch(url: str) -> dict[str, Any]:
         # This Windows device reaches public learning sources through its existing
         # HTTPS proxy. The URL is still a fixed Wikipedia endpoint built only from
-        # the seven canonical topics; raw child speech and family data stay local.
+        # canonical topics; raw child speech and family data stay local.
         with httpx.Client(timeout=4.0, follow_redirects=False, trust_env=True) as client:
             response = client.get(url, headers={"User-Agent": "FamilyAITeacher/1.0 educational-media"})
             response.raise_for_status()
@@ -168,6 +226,31 @@ class TrustedMediaSearch:
                 return title, True
         return "", True
 
+    def _display_thumbnail(self, page: str, summary: dict[str, Any]) -> str:
+        thumbnail = summary.get("thumbnail") or {}
+        fallback = trusted_https_url(thumbnail.get("source"))
+        width, height = thumbnail.get("width"), thumbnail.get("height")
+        if not fallback or type(width) is not int or type(height) is not int or max(width, height) >= 960:
+            return fallback
+        # PageImages supports a maximum thumbnail dimension. Do not rewrite a
+        # Wikimedia URL or pull an unbounded original merely to fill the screen.
+        endpoint = "https://zh.wikipedia.org/w/api.php?" + urlencode({
+            "action": "query", "format": "json", "prop": "pageimages", "titles": page,
+            "piprop": "thumbnail", "pithumbsize": 1280, "formatversion": 2,
+        })
+        try:
+            pages = (self._fetch_json(endpoint).get("query") or {}).get("pages") or []
+            for item in pages[:1]:
+                candidate = item.get("thumbnail") or {}
+                w, h = candidate.get("width"), candidate.get("height")
+                url = trusted_https_url(candidate.get("source"))
+                if (url and type(w) is int and type(h) is int and min(w, h) > 0
+                        and max(w, h) <= 1280 and max(w, h) > max(width, height)):
+                    return url
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            pass
+        return fallback
+
     def search(self, query: str, limit: int = 3) -> dict[str, Any]:
         topic = match_topic(query)
         if not topic:
@@ -187,7 +270,7 @@ class TrustedMediaSearch:
             payload = self._fetch_json(endpoint)
             online_search = True
             page_url = trusted_https_url(((payload.get("content_urls") or {}).get("desktop") or {}).get("page"))
-            thumbnail = trusted_https_url((payload.get("thumbnail") or {}).get("source"))
+            thumbnail = self._display_thumbnail(page, payload)
             title = str(payload.get("title") or topic).strip()[:60]
             description = str(payload.get("description") or payload.get("extract") or "").strip()[:100]
             if page_url and thumbnail:

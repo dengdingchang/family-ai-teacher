@@ -10,7 +10,7 @@ const source = fs.readFileSync(
 
 test("starting voice requests microphone only, without implicitly opening the camera", async () => {
   const fn = source.slice(
-    source.indexOf("async function startContinuousConversation()"),
+    source.indexOf("async function startContinuousConversation("),
     source.indexOf("function stopContinuousConversation()"),
   );
   const requests = [];
@@ -33,6 +33,7 @@ test("starting voice requests microphone only, without implicitly opening the ca
     }
   }
   const context = vm.createContext({
+    pageIsLeaving: false,
     navigator: {
       mediaDevices: {
         getUserMedia: async (constraints) => {

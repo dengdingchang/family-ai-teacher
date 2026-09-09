@@ -2,7 +2,7 @@
 
 ## Scene and direction
 
-A four-year-old sits at the family laptop in morning daylight, ready to tell Dad about a toy. The surface feels like a calm, familiar room: warm paper, two equal places to meet, one easy microphone button. The parent visits the same room through a readable growth journal.
+A four-year-old sits at the family laptop in morning daylight, ready to tell Dad about a toy. The surface feels like a calm, familiar room: warm paper, Dad as the large primary view, a smaller child preview, and one easy microphone button. The parent visits the same room through a readable growth journal.
 
 This is a product interface. Restrained color carries function: forest green is the primary action and confirmed learning; apricot identifies the child's space and Dad's messages. No decorative motion, gradients, external fonts, generated portraits, or face overlays.
 
@@ -14,8 +14,8 @@ This is a product interface. Restrained color carries function: forest green is 
 - Dividers: `oklch(.88 .019 107)`. Secondary green: `oklch(.93 .024 157)`.
 - Danger: `oklch(.48 .14 28)`. Warning: `oklch(.60 .12 70)`.
 - Typography: local Segoe UI / PingFang SC / Microsoft YaHei / system-ui; no network fonts.
-- Child title 27px, section title 21px, voice action 20px, conversation text 15px. Parent title 36px, section title 22px, text 13–16px. Mobile uses fixed smaller steps.
-- Children’s main controls are at least 48px, the microphone 56px in the compact left control area. 3px visible keyboard focus. Reduced motion disables all animation.
+- Child title 27px, section title 21px, voice action 20px, conversation text 18px (17px mobile). Parent title 36px, section title 22px, text 13–16px.
+- Children’s controls are at least 48px, with a wide microphone action below the primary view. 3px visible keyboard focus. Reduced motion disables all animation.
 - Corners: child stage 26px, video 16px, control 18px; parent sections 17px, form controls 9–10px.
 
 ## Child surface
