@@ -25,11 +25,15 @@ def test_api_uses_service_date_for_save_stale_and_clear(tmp_path, monkeypatch):
     saved = client.patch("/api/profile", json={"daily_guidance": "  练 刷牙  ", "daily_guidance_date": "2000-01-01"}).json()
     assert saved["daily_guidance_date"] == today
     assert saved["daily_guidance_active"] is True
+    dashboard = client.get("/api/parent/dashboard").json()
+    assert dashboard["profile"]["daily_guidance_active"] is True
 
     store.update_child_profile({"daily_guidance_date": "2000-01-01"})
     stale = client.get("/api/profile").json()
     assert stale["daily_guidance"] == "练 刷牙"
     assert stale["daily_guidance_active"] is False
+    stale_dashboard = client.get("/api/parent/dashboard").json()
+    assert stale_dashboard["profile"]["daily_guidance_active"] is False
 
     cleared = client.patch("/api/profile", json={"daily_guidance": ""}).json()
     assert cleared["daily_guidance"] == ""

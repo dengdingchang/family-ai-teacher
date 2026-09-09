@@ -3392,6 +3392,7 @@ async def cancel_parent_message(message_id: str) -> dict[str, Any]:
 @app.get("/api/parent/dashboard")
 async def parent_dashboard() -> dict[str, Any]:
     dashboard = memory.get_parent_dashboard()
+    dashboard["profile"] = _profile_for_client(dashboard.get("profile", {}))
     dashboard["brain"] = {
         "mode": dashboard.get("profile", {}).get("brain_mode", "ai_station"),
         "provider": "AI Station",
