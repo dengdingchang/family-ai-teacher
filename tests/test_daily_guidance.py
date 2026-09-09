@@ -71,5 +71,56 @@ def test_media_endpoint_accepts_only_a_short_canonical_topic(monkeypatch):
     client = TestClient(main.app)
     assert client.post("/api/media/suggestions", json={"topic": "刷牙"}).status_code == 200
     assert requested == ["刷牙"]
+    assert client.post("/api/media/suggestions", json={"topic": "看看蝴蝶"}).status_code == 422
     assert client.post("/api/media/suggestions", json={"topic": "孩子刚才说了一整句包含家庭信息的原话"}).status_code == 422
     assert requested == ["刷牙"]
+
+
+def test_media_endpoint_starts_only_a_canonical_async_image_job(monkeypatch):
+    requested = []
+
+    class FakeSearch:
+        def search(self, topic):
+            return {"topic": topic, "cards": [], "reason": ""}
+
+    class FakeGenerator:
+        def request(self, topic, job_id=""):
+            requested.append((topic, job_id))
+            return {
+                "job_id": job_id,
+                "topic": topic,
+                "status": "queued",
+                "status_url": f"/api/image-generation/jobs/{job_id}",
+            }
+
+    monkeypatch.setattr(main, "media_search", FakeSearch())
+    monkeypatch.setattr(main, "image_generator", FakeGenerator())
+    response = TestClient(main.app).post(
+        "/api/media/suggestions",
+        json={"topic": "蝴蝶", "generate_image": True, "image_job_id": "a" * 32},
+    )
+    assert response.status_code == 200
+    assert requested == [("蝴蝶", "a" * 32)]
+    assert response.json()["image_generation"] == "queued"
+
+
+def test_generated_media_route_accepts_only_fixed_hash_filename(tmp_path, monkeypatch):
+    image = tmp_path / "fixture.png"
+    image.write_bytes(b"fixture")
+    calls = []
+
+    class FakeGenerator:
+        def safe_file(self, filename):
+            calls.append(filename)
+            return image
+
+    monkeypatch.setattr(main, "image_generator", FakeGenerator())
+    client = TestClient(main.app)
+    assert client.get("/api/generated-media/not-a-hash.png").status_code == 404
+    assert calls == []
+    filename = f"{'a' * 24}.png"
+    response = client.get(f"/api/generated-media/{filename}")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert calls == [filename]

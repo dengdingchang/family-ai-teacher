@@ -15,8 +15,10 @@ function hostIsTrusted(hostname) {
 
 export function trustedMediaUrl(value) {
   if (typeof value !== "string" || !value.trim()) return "";
+  const candidate = value.trim();
+  if (/^\/api\/generated-media\/[0-9a-f]{24}\.png$/.test(candidate)) return candidate;
   try {
-    const parsed = new URL(value.trim());
+    const parsed = new URL(candidate);
     if (parsed.protocol !== "https:" || !hostIsTrusted(parsed.hostname)) return "";
     if (parsed.username || parsed.password || (parsed.port && parsed.port !== "443")) return "";
     return parsed.href;
@@ -197,14 +199,14 @@ export class MediaViewer {
     const title = this._node("p", "media-viewer__title", normal.title);
     const replay = this._button("↻ 再看一次", "media-viewer__control media-viewer__replay", () => this._restartImageTimer());
     panel.append(image, title, replay);
-    this._prepareImageTimer(this.overlay, image);
+    this._prepareImageTimer(this.overlay, image, { pauseOnHover: Boolean(trigger) });
     image.src = normal.thumbnailUrl;
     this.openKind = "image";
     this.onOpen("image");
     return true;
   }
 
-  _prepareImageTimer(overlay, image) {
+  _prepareImageTimer(overlay, image, { pauseOnHover = true } = {}) {
     this.timer = {
       handle: null,
       loaded: false,
@@ -214,8 +216,10 @@ export class MediaViewer {
     };
     const pause = reason => this._pauseImageTimer(reason);
     const resume = reason => this._resumeImageTimer(reason);
-    overlay.addEventListener("mouseenter", () => pause("hover"));
-    overlay.addEventListener("mouseleave", () => resume("hover"));
+    if (pauseOnHover) {
+      overlay.addEventListener("mouseenter", () => pause("hover"));
+      overlay.addEventListener("mouseleave", () => resume("hover"));
+    }
     overlay.addEventListener("pointerdown", () => pause("pointer"));
     overlay.addEventListener("pointerup", () => resume("pointer"));
     overlay.addEventListener("pointercancel", () => resume("pointer"));

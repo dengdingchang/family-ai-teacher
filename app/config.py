@@ -38,6 +38,19 @@ def _path_env(name: str, default: str) -> Path:
     return Path(os.getenv(name, default)).expanduser()
 
 
+def _runtime_path_env(name: str, directory: str) -> Path:
+    root = (PROJECT_ROOT / "runtime").resolve(strict=False)
+    candidate = Path(os.getenv(name, str(root / directory))).expanduser()
+    if not candidate.is_absolute():
+        candidate = PROJECT_ROOT / candidate
+    candidate = candidate.resolve(strict=False)
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return root / directory
+    return candidate
+
+
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
@@ -56,6 +69,15 @@ class Settings:
     llm_model: str
     llm_timeout_seconds: float
     llm_vision_timeout_seconds: float
+
+    imagegen_enabled: bool
+    imagegen_codex_path: str
+    imagegen_model: str
+    imagegen_timeout_seconds: float
+    imagegen_retry_backoff_seconds: float
+    imagegen_skill_path: Path
+    imagegen_output_dir: Path
+    imagegen_jobs_dir: Path
 
     stt_python: Path
     stt_model_path: Path
@@ -114,6 +136,12 @@ class Settings:
             stt_device = "cpu"
         stt_cuda_directory = os.getenv("STT_CUDA_LIBRARY_DIR", "").strip()
         stt_fallback = os.getenv("STT_FALLBACK_MODEL_PATH", "").strip()
+        codex_home = Path(os.getenv("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+        imagegen_skill_value = os.getenv("IMAGEGEN_SKILL_PATH", "").strip()
+        imagegen_skill_path = (
+            Path(imagegen_skill_value).expanduser()
+            if imagegen_skill_value else codex_home / "skills/.system/imagegen/SKILL.md"
+        )
 
         return cls(
             project_root=PROJECT_ROOT,
@@ -133,6 +161,22 @@ class Settings:
                 5.0,
                 min(120.0, float(os.getenv("LLM_VISION_TIMEOUT_SECONDS", "25"))),
             ),
+            imagegen_enabled=os.getenv("IMAGEGEN_ENABLED", "0").strip().lower()
+            in {"1", "true", "yes", "on"},
+            imagegen_codex_path=os.getenv("IMAGEGEN_CODEX_PATH", "codex").strip() or "codex",
+            imagegen_model=os.getenv("IMAGEGEN_AGENT_MODEL", "gpt-5.6-sol").strip()
+            or "gpt-5.6-sol",
+            imagegen_timeout_seconds=max(
+                30.0,
+                min(300.0, float(os.getenv("IMAGEGEN_TIMEOUT_SECONDS", "180"))),
+            ),
+            imagegen_retry_backoff_seconds=max(
+                30.0,
+                min(900.0, float(os.getenv("IMAGEGEN_RETRY_BACKOFF_SECONDS", "120"))),
+            ),
+            imagegen_skill_path=imagegen_skill_path,
+            imagegen_output_dir=_runtime_path_env("IMAGEGEN_OUTPUT_DIR", "generated-media"),
+            imagegen_jobs_dir=_runtime_path_env("IMAGEGEN_JOBS_DIR", "imagegen-jobs"),
             stt_python=_path_env(
                 "STT_PYTHON",
                 r"X:\AI\faster-whisper-offline\python-3.10.11-embed-amd64\python.exe",

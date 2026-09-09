@@ -64,11 +64,12 @@ test("media lookup sends only a local canonical topic and video pauses the conve
   const mediaStart = app.indexOf("async function loadMediaSuggestions(");
   const mediaEnd = app.indexOf("function renderHistory(", mediaStart);
   const media = app.slice(mediaStart, mediaEnd);
-  assert.match(media, /JSON\.stringify\(\{ topic \}\)/);
+  assert.match(media, /JSON\.stringify\(\{ topic, generate_image: generateImage, image_job_id: imageJobId \}\)/);
   for (const topic of ["蝴蝶", "火山", "彩虹"]) assert.match(media, new RegExp(`"${topic}"`));
   assert.doesNotMatch(media, /encodeURIComponent\(text\)|\?topic=/);
   assert.match(media, /signal: controller\.signal/);
   assert.match(media, /generation !== mediaSuggestionGeneration/);
+  assert.match(app, /loadMediaSuggestions\(childTurnText, assistantText\)/);
   assert.match(app, /function stopContinuousConversation\(\)[\s\S]*cancelMediaSuggestionLookup\(\)/);
   assert.match(app, /if \(kind !== "video"\) return/);
   assert.match(app, /mediaConversationWasActive = conversationActive/);

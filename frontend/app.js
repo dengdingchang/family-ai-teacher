@@ -37,6 +37,7 @@ let mediaPlaybackGeneration = 0;
 let mediaResumePending = false;
 let mediaSuggestionRequestController = null;
 let mediaSuggestionGeneration = 0;
+let mediaSuggestionJobStatusUrl = "";
 let pageIsLeaving = false;
 
 async function resumeConversationAfterMedia(generation) {
@@ -225,12 +226,72 @@ function cancelMediaSuggestionLookup() {
   const controller = mediaSuggestionRequestController;
   mediaSuggestionRequestController = null;
   controller?.abort();
+  const statusUrl = mediaSuggestionJobStatusUrl;
+  mediaSuggestionJobStatusUrl = "";
+  if (/^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(statusUrl)) {
+    fetch(`${statusUrl}/cancel`, { method: "POST", keepalive: true }).catch(() => {});
+  }
+  mediaViewer?.close({ restoreFocus: false });
 }
 
-async function loadMediaSuggestions(query) {
+function waitForMediaPoll(delayMs, signal) {
+  return new Promise(resolve => {
+    if (signal.aborted) return resolve(false);
+    const timer = setTimeout(() => {
+      signal.removeEventListener?.("abort", cancelled);
+      resolve(true);
+    }, delayMs);
+    const cancelled = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    signal.addEventListener?.("abort", cancelled, { once: true });
+  });
+}
+
+async function pollGeneratedMedia(job, topic, group, controller, generation) {
+  const statusUrl = String(job?.status_url || "");
+  if (!/^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(statusUrl)) return;
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (!await waitForMediaPoll(2000, controller.signal)) return;
+    if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
+    const response = await fetch(statusUrl, { signal: controller.signal });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || String(result.topic || "") !== topic) return;
+    if (result.status === "failed") {
+      if (mediaSuggestionJobStatusUrl === statusUrl) mediaSuggestionJobStatusUrl = "";
+      if (!group.cards.length && generation === mediaSuggestionGeneration) {
+        group.message = `这次没有画好${topic}，我们先继续聊。`;
+        renderHistory();
+      }
+      return;
+    }
+    if (result.status === "cancelled") {
+      if (mediaSuggestionJobStatusUrl === statusUrl) mediaSuggestionJobStatusUrl = "";
+      return;
+    }
+    if (result.status !== "completed" || !result.card) continue;
+    if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
+    const imageUrl = String(result.card.thumbnail_url || "");
+    if (!group.cards.some(card => String(card.thumbnail_url || "") === imageUrl)) {
+      group.cards.unshift(result.card);
+    }
+    group.message = "";
+    if (mediaSuggestionJobStatusUrl === statusUrl) mediaSuggestionJobStatusUrl = "";
+    renderHistory();
+    if (!document.hidden && generation === mediaSuggestionGeneration) {
+      mediaViewer.openImage(result.card);
+    }
+    return;
+  }
+}
+
+async function loadMediaSuggestions(childText, assistantText = "") {
   cancelMediaSuggestionLookup();
   const generation = mediaSuggestionGeneration;
-  const text = String(query || "").replace(/\s+/g, "");
+  const childRequest = String(childText || "").replace(/\s+/g, "");
+  const teacherReply = String(assistantText || "").replace(/\s+/g, "");
+  const text = `${childRequest}${teacherReply}`;
   const topics = [
     ["刷牙", ["刷牙", "牙刷", "牙齿", "牙齒"]], ["恐龙", ["恐龙", "恐龍", "霸王龙", "暴龍"]],
     ["月亮", ["月亮", "月球"]], ["太空", ["太空", "宇宙", "星球"]], ["鱼", ["鱼", "魚"]],
@@ -247,26 +308,63 @@ async function loadMediaSuggestions(query) {
   const topic = topics.find(([, aliases]) => aliases.some(alias => text.includes(alias)))?.[0]
     || educationTopics.find(candidate => text.includes(candidate)) || "";
   if (!topic) return;
+  const childAskedForDrawing = /(画一张|画一个|画幅|画出|生成一张|做一张|给我(?:画|生成|做|看)(?:一张|一个)?(?:图片|图画|插图|照片)|我要(?:一张|一个)?(?:图片|图画|插图|照片)|我想要(?:一张|一个)?(?:图片|图画|插图|照片))/.test(childRequest);
+  const teacherWillDraw = /(?:我|爸爸老师)(?:现在|马上|来|可以|给你|为你){0,4}(?:画|生成|做)(?:一张|一个|幅)?[^。！？]{0,16}(?:图|图片|图画|插图|照片)/.test(teacherReply);
+  const teacherWillShow = /(给你看|一起看|来看看|我们看看|我们看一看|看看|看一看)[^。！？]{0,16}/.test(teacherReply);
+  const generateImage = childAskedForDrawing || teacherWillDraw || teacherWillShow;
+  const imageJobId = generateImage && typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase() : "";
+  if (generateImage && !/^[0-9a-f]{32}$/.test(imageJobId)) return;
+  if (imageJobId) mediaSuggestionJobStatusUrl = `/api/image-generation/jobs/${imageJobId}`;
   const controller = new AbortController();
   mediaSuggestionRequestController = controller;
   try {
     const response = await fetch("/api/media/suggestions", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, generate_image: generateImage, image_job_id: imageJobId }),
       signal: controller.signal,
     });
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const payload = await response.json().catch(() => ({}));
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const returnedTopic = String(payload.topic || "");
-    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards)
-        || mediaSuggestionGroups.some(group => group.topic === returnedTopic)) return;
-    const message = payload.cards.length ? "" : payload.reason === "source_unavailable"
+    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards)) return;
+    const drawing = ["queued", "running"].includes(payload.image_generation);
+    const message = payload.cards.length ? "" : drawing ? `正在画${topic}，先继续聊。`
+      : payload.image_generation === "busy" ? "图片任务有点忙，我们先继续聊。"
+      : payload.image_generation === "failed" ? `这次没有画好${topic}，我们先继续聊。`
+      : payload.reason === "source_unavailable"
       ? `这次暂时连不上${topic}图片，我们先继续聊。`
       : `这次没有找到合适的${topic}图片，我们先继续聊。`;
-    mediaSuggestionGroups.push({ topic: returnedTopic, cards: payload.cards, message });
+    let group = mediaSuggestionGroups.find(item => item.topic === returnedTopic);
+    if (!group) {
+      group = { topic: returnedTopic, cards: payload.cards, message };
+      mediaSuggestionGroups.push(group);
+    } else {
+      const existing = new Set(group.cards.map(card => String(card.thumbnail_url || "")));
+      group.cards.push(...payload.cards.filter(card => !existing.has(String(card.thumbnail_url || ""))));
+      group.message = message;
+    }
     renderHistory();
+    const completedGeneratedCard = payload.image_generation === "completed"
+      ? payload.cards.find(card => card?.generated === true) : null;
+    if (completedGeneratedCard && !document.hidden && generation === mediaSuggestionGeneration) {
+      mediaSuggestionJobStatusUrl = "";
+      mediaViewer.openImage(completedGeneratedCard);
+    }
+    if (drawing) {
+      mediaSuggestionJobStatusUrl = String(payload.image_generation_job?.status_url || "");
+      await pollGeneratedMedia(payload.image_generation_job, topic, group, controller, generation);
+    } else if (mediaSuggestionJobStatusUrl.endsWith(imageJobId)) {
+      mediaSuggestionJobStatusUrl = "";
+    }
   } catch (_) {
     // Learning cards are optional; voice and local activities stay available.
+    const statusUrl = mediaSuggestionJobStatusUrl;
+    if (/^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(statusUrl)) {
+      fetch(`${statusUrl}/cancel`, { method: "POST", keepalive: true }).catch(() => {});
+      mediaSuggestionJobStatusUrl = "";
+    }
   } finally {
     if (mediaSuggestionRequestController === controller) mediaSuggestionRequestController = null;
   }
@@ -1331,7 +1429,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
       drawingBoard.close();
     }
     hideLiveTurn();
-    if (source !== "drawing-observation") void loadMediaSuggestions(`${childTurnText} ${assistantText}`);
+    if (source !== "drawing-observation") void loadMediaSuggestions(childTurnText, assistantText);
     stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
     else setStatus("回答完成", "idle");
@@ -2541,7 +2639,11 @@ const childProfileRefreshTimer = window.setInterval(() => {
   if (document.visibilityState === "visible") void loadChildProfileControls();
 }, 8000);
 document.addEventListener("visibilitychange", () => {
+  if (document.hidden) cancelMediaSuggestionLookup();
   if (document.visibilityState === "visible") void loadChildProfileControls();
 });
-window.addEventListener("pagehide", () => window.clearInterval(childProfileRefreshTimer), { once: true });
+window.addEventListener("pagehide", () => {
+  cancelMediaSuggestionLookup();
+  window.clearInterval(childProfileRefreshTimer);
+}, { once: true });
 connectAvatar();

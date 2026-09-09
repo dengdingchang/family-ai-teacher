@@ -68,6 +68,9 @@ test("URL boundary requires HTTPS, an exact allowlisted host suffix, and canonic
   assert.equal(trustedMediaUrl("https://user:secret@youtube.com/watch?v=AcYCMJvdupI"), "");
   assert.equal(trustedMediaUrl("https://youtube.com:444/watch?v=AcYCMJvdupI"), "");
   assert.match(trustedMediaUrl("https://upload.wikimedia.org/example.jpg"), /^https:/);
+  assert.equal(trustedMediaUrl("/api/generated-media/0123456789abcdef01234567.png"), "/api/generated-media/0123456789abcdef01234567.png");
+  assert.equal(trustedMediaUrl("/api/generated-media/../../data/child_profile.json"), "");
+  assert.equal(trustedMediaUrl("/api/generated-media/0123456789abcdef01234567.jpg"), "");
   assert.equal(youtubeEmbedUrl("https://www.youtube.com/watch?v=AcYCMJvdupI"), "https://www.youtube-nocookie.com/embed/AcYCMJvdupI?autoplay=1");
   assert.equal(youtubeEmbedUrl("https://youtu.be/AcYCMJvdupI"), "https://www.youtube-nocookie.com/embed/AcYCMJvdupI?autoplay=1");
   assert.equal(youtubeEmbedUrl("https://www.youtube.com/embed/AcYCMJvdupI"), "");
@@ -109,6 +112,19 @@ test("image auto-close starts on load, preserves remaining time while paused, an
   const replay = findAll(overlay, "button").find(button => button.textContent.includes("再看一次"));
   replay.dispatch("click");
   assert.equal([...f.timers.values()][0].ms, 8000);
+  [...f.timers.values()][0].fn();
+  assert.equal(f.viewer.overlay, null);
+  f.viewer.destroy();
+});
+
+test("an automatically opened image cannot be frozen by appearing under a stationary pointer", async () => {
+  const f = await fixture();
+  f.viewer.openImage({ kind: "image", title: "磁铁", url: "/api/generated-media/0123456789abcdef01234567.png", thumbnail_url: "/api/generated-media/0123456789abcdef01234567.png" });
+  const overlay = f.viewer.overlay, image = findAll(overlay, "img")[0];
+  image.dispatch("load");
+  assert.equal(f.timers.size, 1);
+  overlay.dispatch("mouseenter");
+  assert.equal(f.timers.size, 1, "a programmatic overlay keeps its child-friendly countdown");
   [...f.timers.values()][0].fn();
   assert.equal(f.viewer.overlay, null);
   f.viewer.destroy();

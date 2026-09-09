@@ -28,8 +28,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from avatar.control import StreamingAvatarControl
+from app.image_generation import CodexImageGenerationManager
 from app.repetition import RepeatedQuestionGuard
-from app.media import TrustedMediaSearch
+from app.media import TrustedMediaSearch, match_topic
 from camera.adapter import BrowserCameraAdapter, CameraAdapterError
 from llm.client import LLMError, LLMNotConfiguredError, OpenAICompatibleClient
 from memory.store import DEFAULT_ENABLED_ACTIVITIES, MemoryStore
@@ -83,6 +84,17 @@ if settings.tts_mode == "streaming":
 llm = OpenAICompatibleClient(settings)
 camera = BrowserCameraAdapter()
 media_search = TrustedMediaSearch()
+image_generator = CodexImageGenerationManager(
+    enabled=settings.imagegen_enabled,
+    codex_path=settings.imagegen_codex_path,
+    model=settings.imagegen_model,
+    skill_path=settings.imagegen_skill_path,
+    runtime_root=settings.project_root / "runtime",
+    output_dir=settings.imagegen_output_dir,
+    jobs_dir=settings.imagegen_jobs_dir,
+    timeout_seconds=settings.imagegen_timeout_seconds,
+    retry_backoff_seconds=settings.imagegen_retry_backoff_seconds,
+)
 
 app = FastAPI(title="Family AI Teacher", version="0.3.0")
 logger = logging.getLogger(__name__)
@@ -187,6 +199,7 @@ async def shutdown_tts() -> None:
     shutdown = getattr(tts, "shutdown", None)
     if shutdown is not None:
         await asyncio.to_thread(shutdown)
+    await asyncio.to_thread(image_generator.shutdown)
 
 
 class TextRequest(BaseModel):
@@ -196,6 +209,8 @@ class TextRequest(BaseModel):
 
 class MediaSuggestionRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=16)
+    generate_image: bool = False
+    image_job_id: str = Field(default="", max_length=32, pattern=r"^[0-9a-f]*$")
 
 
 class InteractionIntervalRequest(BaseModel):
@@ -2623,6 +2638,8 @@ async def health() -> dict[str, Any]:
         "bind": settings.app_host,
         "port": settings.app_port,
         "llm_configured": llm.configured,
+        "image_generation": "ready" if image_generator.configured else "not_configured",
+        "image_generation_transport": "codex-app-server-stdio" if image_generator.configured else None,
         "stt_ready": stt.ready,
         "stt_runtime": getattr(stt, "runtime_status", None),
         "tts_ready": tts.ready,
@@ -2668,7 +2685,53 @@ async def media_suggestions(
     request: MediaSuggestionRequest,
 ) -> dict[str, Any]:
     """Return learning cards for a client-canonicalized allowlisted topic."""
-    return await asyncio.to_thread(media_search.search, request.topic)
+    topic = request.topic.strip()
+    if not topic or match_topic(topic) != topic:
+        raise HTTPException(status_code=422, detail="topic must be one canonical educational topic")
+    result = await asyncio.to_thread(media_search.search, topic)
+    if not request.generate_image:
+        return result
+    generation = image_generator.request(topic, request.image_job_id)
+    result["image_generation"] = generation["status"]
+    if generation["status"] in {"queued", "running"}:
+        result["image_generation_job"] = generation
+    elif generation["status"] == "completed" and generation.get("card"):
+        result["cards"] = [generation["card"], *result.get("cards", [])]
+    return result
+
+
+@app.get("/api/image-generation/jobs/{job_id}")
+async def image_generation_status(job_id: str) -> dict[str, Any]:
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        raise HTTPException(status_code=404, detail="image generation job not found")
+    result = image_generator.status(job_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="image generation job not found")
+    return result
+
+
+@app.post("/api/image-generation/jobs/{job_id}/cancel")
+async def cancel_image_generation(job_id: str) -> dict[str, Any]:
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        raise HTTPException(status_code=404, detail="image generation job not found")
+    result = image_generator.cancel(job_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="image generation job not found")
+    return result
+
+
+@app.get("/api/generated-media/{filename}")
+async def generated_media(filename: str) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{24}\.png", filename):
+        raise HTTPException(status_code=404, detail="generated image not found")
+    path = image_generator.safe_file(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="generated image not found")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @app.patch("/api/profile")
