@@ -17,6 +17,7 @@ function conversation(overrides = {}) {
       confirmInput() { calls.push('input'); }, end() {},
     } },
     setBusy() {}, setStatus() {}, resetLiveTurn() {}, hideLiveTurn() {},
+    loadMediaSuggestions() {},
     stopVadLoop() { calls.push('pause'); }, startBargeInMonitor() { calls.push('barge'); }, stopBargeInMonitor() {},
     beginContinuousSegment() { calls.push('listen'); c.segmentRecording = true; },
     clearResponseQueue() {}, cancelPlayback() {}, enqueueAudio() { calls.push('audio'); },

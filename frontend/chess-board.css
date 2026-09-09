@@ -19,16 +19,22 @@
 .chess-board__modes .chess-board__button[aria-pressed="true"] { background: #deedde; border-color: #205844; box-shadow: inset 0 0 0 1px #205844; }
 .chess-board__content { display: grid; grid-template-columns: minmax(0, 560px) minmax(230px, 330px); justify-content: center; align-items: start; gap: 28px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px 24px max(24px, env(safe-area-inset-bottom)); }
 .chess-board__board-area, .chess-board__panel { min-width: 0; }
-.chess-board__grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); width: 100%; aspect-ratio: 1; border: 2px solid #355b43; border-radius: 8px; overflow: hidden; }
+.chess-board__grid { position: relative; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); width: 100%; aspect-ratio: 1; border: 2px solid #355b43; border-radius: 8px; overflow: hidden; }
+.chess-board__guide-path { position: absolute; z-index: 3; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.chess-board__guide-path line { stroke: #d27c3d; stroke-width: 18; stroke-linecap: round; opacity: .8; }
+.chess-board__guide-path path { fill: #d27c3d; }
 .chess-board__square { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: #f3eedf; color: #163325; font: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; }
 .chess-board__square.is-dark { background: #91ad8c; }
 .chess-board__square.is-selected { background: #e2c86d; box-shadow: inset 0 0 0 3px #78611b; }
 .chess-board__square.is-legal::after { content: ""; position: absolute; width: 24%; height: 24%; border-radius: 50%; background: #186344a8; pointer-events: none; }
 .chess-board__square.is-legal:has(.chess-board__piece:not(:empty))::after { width: 90%; height: 90%; border: 4px solid #186344; background: none; }
-.chess-board__piece { position: relative; z-index: 1; font: clamp(25px, 5vw, 56px)/1 "Segoe UI Symbol", "Noto Sans Symbols 2", serif; pointer-events: none; }
+.chess-board__square.is-guidance-source::before, .chess-board__square.is-guidance-target::before { content: ""; position: absolute; z-index: 4; width: 80%; height: 80%; border: 5px solid #e27935; border-radius: 50%; background: #fff6bd66; box-shadow: 0 0 0 5px #fff8d699; pointer-events: none; }
+.chess-board__square.is-guidance-source::before { border-color: #e27935; }
+.chess-board__square.is-guidance-target::before { width: 88%; height: 88%; border-width: 6px; border-color: #d45135; }
+.chess-board__piece { position: relative; z-index: 5; font: clamp(25px, 5vw, 56px)/1 "Segoe UI Symbol", "Noto Sans Symbols 2", serif; pointer-events: none; }
 .chess-board__piece.is-white { color: #fffdf5; text-shadow: -1px -1px #263b29, 1px 1px #263b29, 1px -1px #263b29, -1px 1px #263b29; }
 .chess-board__piece.is-black { color: #182c23; text-shadow: 0 1px #d5dec5; }
-.chess-board__coordinate { position: absolute; left: 3px; bottom: 1px; font-size: 10px; line-height: 1.2; opacity: .85; pointer-events: none; }
+.chess-board__coordinate { position: absolute; z-index: 5; left: 3px; bottom: 1px; font-size: 14px; font-weight: 800; line-height: 1.2; opacity: .88; pointer-events: none; }
 .chess-board__target { position: absolute; z-index: 2; right: 3px; top: 1px; color: #8c5a06; text-shadow: 0 1px #fff; font-size: 19px; pointer-events: none; }
 .chess-board__target[hidden] { display: none; }
 .chess-board__board-hint { margin: 10px 0; color: #60746c; font-size: 14px; line-height: 1.5; }
@@ -50,6 +56,6 @@
   .chess-board__panel { padding: 16px; }
   .chess-board__feedback { font-size: 17px; margin: 10px 0 16px; }
   .chess-board__piece { font-size: clamp(26px, 9vw, 56px); }
-  .chess-board__coordinate { font-size: 9px; }
+  .chess-board__coordinate { font-size: 13px; font-weight: 800; }
 }
-@media (prefers-reduced-motion: reduce) { .chess-board * { scroll-behavior: auto; } }
+@media (prefers-reduced-motion: reduce) { .chess-board *, .chess-board *::before, .chess-board *::after { scroll-behavior: auto; animation: none !important; transition: none !important; } }

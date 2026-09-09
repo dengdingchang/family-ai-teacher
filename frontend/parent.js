@@ -207,6 +207,7 @@ function renderProfile(profile, brain) {
   byId("brainMode").value = text(profile?.brain_mode) || "ai_station";
   byId("profileInterests").value = listText(profile?.interests);
   byId("learningGoals").value = listText(profile?.learning_goals);
+  byId("dailyGuidance").value = globalThis.FamilyDailyGuidance.valueForForm(profile);
   byId("teachingPreferences").value = listText(profile?.teaching_preferences);
   byId("contentBoundaries").value = listText(profile?.content_boundaries);
   const enabled = Array.isArray(profile?.enabled_activities)
@@ -727,6 +728,7 @@ byId("profileForm").addEventListener("submit", async (event) => {
     brain_mode: byId("brainMode").value,
     interests: parseList(byId("profileInterests").value),
     learning_goals: parseList(byId("learningGoals").value),
+    ...globalThis.FamilyDailyGuidance.patchForSave(byId("dailyGuidance").value),
     teaching_preferences: parseList(byId("teachingPreferences").value),
     content_boundaries: parseList(byId("contentBoundaries").value),
     enabled_activities: enabledActivities,

@@ -707,6 +707,8 @@ class MvpUnitTests(unittest.TestCase):
                 {
                     "name": "宝宝",
                     "learning_goals": ["数到20"],
+                    "daily_guidance": "  今天   练刷牙  ",
+                    "daily_guidance_date": main_module.datetime.now().astimezone().date().isoformat(),
                     "teacher_style": "playful",
                     "content_boundaries": ["不讲吓人的故事"],
                     "enabled_activities": ["story", "unknown", "story"],
@@ -716,8 +718,18 @@ class MvpUnitTests(unittest.TestCase):
             self.assertEqual(profile["enabled_activities"], ["story"])
             self.assertEqual(profile["brain_mode"], "local_lessons_only")
             self.assertEqual(store.export_bundle()["profile"]["learning_goals"], ["数到20"])
+            self.assertEqual(profile["daily_guidance"], "今天 练刷牙")
+            self.assertIn("爸爸今天希望自然引导的主题：今天 练刷牙", _system_prompt(
+                profile, [], [], {"skills": []}, {}, None,
+            ))
+            stale = {**profile, "daily_guidance_date": "2000-01-01"}
+            self.assertNotIn("爸爸今天希望自然引导的主题", _system_prompt(
+                stale, [], [], {"skills": []}, {}, None,
+            ))
             with self.assertRaises(ValueError):
                 store.update_child_profile({"teacher_style": "strict"})
+            with self.assertRaises(ValueError):
+                store.update_child_profile({"daily_guidance_date": "09/09/2026"})
 
     def test_parent_data_deletion_is_confirmed_scoped_and_model_safe(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const path = require("node:path");
+const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const boardModule = import(pathToFileURL(path.join(__dirname, "../frontend/chess-board.js")).href);
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -13,6 +14,7 @@ class Element {
   }
   append(...nodes) { this.children.push(...nodes); }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) { delete this.attributes[name]; }
   getAttribute(name) { return this.attributes[name]; }
   addEventListener(type, listener) { if (!this.handlers.has(type)) this.handlers.set(type, []); this.handlers.get(type).push(listener); }
   removeEventListener(type, listener) { this.handlers.set(type, (this.handlers.get(type) || []).filter(item => item !== listener)); }
@@ -42,6 +44,18 @@ async function fixture(options = {}) {
     click(square) { board.cells.get(square).cell.dispatch("click"); },
     runAi() { const [id, callback] = timers.entries().next().value; timers.delete(id); callback(); } };
 }
+function point(square) {
+  return { x: (square.charCodeAt(0) - 97) * 100 + 50, y: (8 - Number(square[1])) * 100 + 50 };
+}
+function assertVisiblePath(board, move) {
+  const from = point(move.from), to = point(move.to);
+  assert.equal(board.guidancePhase, "path");
+  assert.match(board.cells.get(move.from).cell.className, /is-guidance-source/);
+  assert.match(board.cells.get(move.to).cell.className, /is-guidance-target/);
+  assert.equal(board.guideLine.hidden, false);
+  assert.equal(board.guideLine.getAttribute("x1"), String(from.x)); assert.equal(board.guideLine.getAttribute("y1"), String(from.y));
+  assert.equal(board.guideLine.getAttribute("x2"), String(to.x)); assert.equal(board.guideLine.getAttribute("y2"), String(to.y));
+}
 test("three lessons require the stated legal target and explain wrong moves without changing the board", async () => {
   const f = await fixture(); f.board.open();
   try {
@@ -59,6 +73,59 @@ test("three lessons require the stated legal target and explain wrong moves with
   } finally { f.board.destroy(); }
 });
 
+test("the first lesson uses visible source, path and target guidance without relying on its star", async () => {
+  const f = await fixture(); f.board.open();
+  try {
+    assert.equal(f.board.guidancePhase, "source");
+    assert.match(f.board.cells.get("e2").cell.className, /is-guidance-source/);
+    assert.doesNotMatch(f.board.cells.get("e3").cell.className, /is-guidance-target/);
+    assert.equal(f.board.guideLine.hidden, true);
+    f.click("e2");
+    assertVisiblePath(f.board, { from: "e2", to: "e3" });
+    f.click("e3");
+    assert.equal(f.board.guidancePhase, "complete");
+    assert.doesNotMatch(f.board.cells.get("e2").cell.className, /is-guidance-source/);
+    assert.doesNotMatch(f.board.cells.get("e3").cell.className, /is-guidance-target/);
+    assert.equal(f.board.guideLine.hidden, true);
+  } finally { f.board.destroy(); }
+});
+
+test("the second and third lessons compute their own source, target and arrow coordinates", async () => {
+  const f = await fixture(); f.board.open();
+  try {
+    f.board.lessonIndex = 1; f.board.reset();
+    assert.equal(f.board.guidancePhase, "source"); assert.match(f.board.cells.get("d4").cell.className, /is-guidance-source/);
+    f.click("d4"); assertVisiblePath(f.board, { from: "d4", to: "d7" });
+    f.board.lessonIndex = 2; f.board.reset();
+    assert.equal(f.board.guidancePhase, "source"); assert.match(f.board.cells.get("d4").cell.className, /is-guidance-source/);
+    f.click("d4"); assertVisiblePath(f.board, { from: "d4", to: "f5" });
+  } finally { f.board.destroy(); }
+});
+
+test("hint and repeat preserve their lesson visual guidance while narration is still playing", async () => {
+  const pending = [];
+  const f = await fixture({ onSpeak: () => new Promise(resolve => pending.push(resolve)) }); f.board.open();
+  try {
+    assert.equal(f.board.guidancePhase, "source");
+    f.board.repeatButton.dispatch("click");
+    assert.equal(f.board.guidancePhase, "source");
+    assert.match(f.board.cells.get("e2").cell.className, /is-guidance-source/);
+    f.board.hint();
+    assert.equal(f.board.guidancePhase, "path");
+    assert.match(f.board.cells.get("e3").cell.className, /is-guidance-target/);
+    assert.equal(f.board.guideLine.hidden, false);
+    pending.at(-1)({ ok: true }); await settle();
+    assert.equal(f.board.guidancePhase, "path", "the current spoken hint keeps its source and target visible");
+  } finally { f.board.destroy(); }
+});
+
+test("chess guidance is static when reduced motion is requested", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../frontend/chess-board.css"), "utf8");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /animation: none !important/);
+  assert.match(css, /transition: none !important/);
+});
+
 test("a standard game rejects blocked moves and the opponent makes exactly one legal move", async () => {
   const f = await fixture(); f.board.open(); f.board.startMode("play");
   try {
@@ -72,6 +139,27 @@ test("a standard game rejects blocked moves and the opponent makes exactly one l
     f.board.undo(); assert.equal(f.board.game.fen(), initial, "undo retracts both sides of the round");
     f.click("e2"); f.click("e4"); f.board.undo(); assert.equal(f.board.game.fen(), initial); assert.equal(f.timers.size, 0);
     f.board.reset(); assert.equal(f.board.game.fen(), initial);
+  } finally { f.board.destroy(); }
+});
+
+test("a play hint gives its recommended source and target a path, then clears it on every new board state", async () => {
+  const f = await fixture(); f.board.open(); f.board.startMode("play");
+  try {
+    assert.equal(f.board.guidancePhase, "none");
+    f.board.hint(); const firstHint = f.board.hintMove;
+    assertVisiblePath(f.board, firstHint);
+    f.click("b2");
+    assert.equal(f.board.guidancePhase, "none"); assert.equal(f.board.hintMove, null); assert.equal(f.board.guideLine.hidden, true);
+    f.board.hint(); const recommended = f.board.hintMove;
+    assertVisiblePath(f.board, recommended);
+    f.click(recommended.to);
+    assert.equal(f.board.guidancePhase, "none"); assert.equal(f.board.hintMove, null); assert.equal(f.board.guideLine.hidden, true);
+    await settle(); f.runAi();
+    assert.equal(f.board.guidancePhase, "none", "the opponent turn cannot retain the child's old recommendation");
+    f.board.undo(); assert.equal(f.board.guidancePhase, "none");
+    f.board.reset(); assert.equal(f.board.guidancePhase, "none");
+    f.board.startMode("learn"); assert.equal(f.board.guidancePhase, "source");
+    f.board.startMode("play"); assert.equal(f.board.guidancePhase, "none");
   } finally { f.board.destroy(); }
 });
 

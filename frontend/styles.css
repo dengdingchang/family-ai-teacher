@@ -993,6 +993,7 @@ h2 {
     font-size: 12px;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   #avatarStage[data-state="listening"] .voice-bars i,
   #avatarStage[data-state="listening"] .voice-bars i:nth-child(2n) {
@@ -1005,4 +1006,91 @@ h2 {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* 2026-09 child home: one main action and one responsive activity path. */
+.camera-toggle { position: relative; }
+.camera-state { position: absolute; right: 3px; bottom: 2px; min-width: 16px; padding: 1px 3px; border-radius: 5px; background: var(--paper); color: var(--muted); font-size: 10px; font-weight: 700; }
+.camera-toggle[data-open="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.record-video-tool { position: relative; }
+.record-progress { position: absolute; inset: -3px; border: 3px solid transparent; border-top-color: currentColor; border-radius: inherit; opacity: 0; transform: rotate(calc(var(--record-progress, 0) * 3.6deg)); }
+.recording .record-progress { opacity: 1; }
+
+.stage-card .conversation-controls { grid-template-columns: 1fr; gap: 12px; padding: 16px 0 14px; }
+.stage-card .activity-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stage-card .activity-chip { min-height: 52px; flex-direction: row; justify-content: center; padding: 10px 14px; font-size: 15px; }
+.play-button { justify-content: space-between !important; }
+.play-button[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.play-choices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--accent-soft); }
+.play-choice { min-height: 64px !important; flex-direction: column !important; text-align: center; }
+.entry-status { color: var(--muted); font-size: 11px; font-weight: 500; }
+
+.chat-history .live-turn { margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--line); }
+
+@media (max-width: 640px) {
+  .stage-heading { display: none; }
+  .stage-card .activity-row { grid-template-columns: 1fr; }
+  .stage-card .activity-chip { min-height: 52px; padding: 8px 12px; font-size: 15px; }
+  .play-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chat-history .live-turn { padding-inline: 0; }
+}
+
+@media (max-width: 370px) {
+  .stage-footer { min-height: 32px; }
+  .avatar-caption { padding-block: 4px; }
+  .record-hint { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .stage-card .activity-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .stage-card .activity-row .activity-chip { min-height: 48px; padding-inline: 4px; font-size: 12px; }
+}
+
+/* Child-readable activity pictures: text stays as a short caregiver aid. */
+.stage-heading,
+.stage-footer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.stage-card .conversation-controls { padding-block: 12px 10px; }
+.stage-card .activity-chip {
+  min-height: 68px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  background: var(--paper);
+}
+.stage-card .activity-chip svg {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.stage-card .play-button { position: relative; justify-content: center !important; }
+.play-caret { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 18px; }
+.play-choice { min-height: 92px !important; }
+.play-choice:nth-child(2) svg { color: oklch(0.54 0.12 55); }
+.play-choice:nth-child(3) svg { color: oklch(0.48 0.10 245); }
+.play-choice:nth-child(4) svg { color: oklch(0.52 0.12 25); }
+
+@media (max-width: 640px) {
+  .stage-card .activity-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .stage-card .activity-row .activity-chip { min-height: 68px; padding: 4px; font-size: 13px; }
+  .stage-card .activity-chip svg { width: 32px; height: 32px; }
+  .play-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 370px) {
+  .stage-footer { display: none; }
+  .video-meta { min-height: 120px; }
+  .stage-card .activity-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .stage-card .activity-row .activity-chip { min-height: 64px; padding-inline: 2px; font-size: 12px; }
+  .stage-card .activity-chip svg { width: 30px; height: 30px; }
+  .video-placeholder strong,
+  .video-placeholder span { display: none; }
 }

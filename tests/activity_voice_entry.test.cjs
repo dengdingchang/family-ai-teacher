@@ -3,7 +3,7 @@ const { test } = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const source = fs.readFileSync(require("node:path").join(__dirname, "../frontend/app.js"), "utf8");
-const fn = source.slice(source.indexOf("async function startActivityConversation("), source.indexOf("for (const button of activityButtons) {", source.indexOf("async function startActivityConversation(")));
+const fn = source.slice(source.indexOf("async function startActivityConversation("), source.indexOf("async function interruptActiveReply(", source.indexOf("async function startActivityConversation(")));
 
 function fixture(overrides = {}) {
   const calls = [];

@@ -288,6 +288,7 @@ function conversationFixture(overrides = {}) {
     answerBox: { classList: { add() {} } }, liveTurn: {},
     createConversationTurnId: () => 'synthetic-chess-context',
     resetLiveTurn() {}, hideLiveTurn() {}, cancelConversationTurn() {},
+    loadMediaSuggestions() {},
     waitForAudioQueue: async () => {},
     consumeSse: async (_response, emit) => emit({ event: 'done', assistant_text: '这是模拟棋盘回答。', ok: true }),
   });

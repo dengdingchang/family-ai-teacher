@@ -50,6 +50,8 @@ DEFAULT_PROFILE = {
     "interests": [],
     "teaching_preferences": [],
     "learning_goals": [],
+    "daily_guidance": "",
+    "daily_guidance_date": "",
     "teacher_style": "warm_guided",
     "content_boundaries": [],
     "enabled_activities": list(DEFAULT_ENABLED_ACTIVITIES),
@@ -183,6 +185,8 @@ class MemoryStore:
             "interests",
             "teaching_preferences",
             "learning_goals",
+            "daily_guidance",
+            "daily_guidance_date",
             "teacher_style",
             "content_boundaries",
             "enabled_activities",
@@ -219,6 +223,13 @@ class MemoryStore:
             clean_updates["brain_mode"] = mode
         if "name" in clean_updates:
             clean_updates["name"] = self._clean_text(clean_updates["name"], 16)
+        if "daily_guidance" in clean_updates:
+            clean_updates["daily_guidance"] = self._clean_text(clean_updates["daily_guidance"], 120)
+        if "daily_guidance_date" in clean_updates:
+            value = self._clean_text(clean_updates["daily_guidance_date"], 10)
+            if value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                raise ValueError("daily_guidance_date must use YYYY-MM-DD")
+            clean_updates["daily_guidance_date"] = value
         if "preferred_language" in clean_updates:
             clean_updates["preferred_language"] = self._clean_text(clean_updates["preferred_language"], 48)
         with self._lock:

@@ -20,14 +20,16 @@ This is a product interface. Restrained color carries function: forest green is 
 
 ## Child surface
 
-1. Place the child/camera viewport on the left and Dad's avatar on the right, with equal widths including narrow screens. The explicitly opened drawing board temporarily uses the full viewport.
-2. Fit the voice action into the first desktop screen. Size portraits around available height; never make a giant photo push the primary action below the fold.
-3. Group the primary voice action and the three activity choices inside the left child viewport area. Do not repeat them in a separate row below the main scene. Keep the voice action dominant; the keyboard form lives in a native expandable adult helper.
-4. Complete history remains available in a bounded scrollable log with keyboard access. Real-time text remains separate until playback is acknowledged.
+1. Use a FaceTime/WeChat-like stage: Dad's avatar is the centered primary view and the child's camera is a small picture-in-picture view. Clicking the small view swaps primary and secondary without reacquiring either media stream. The explicitly opened drawing board temporarily uses the full viewport.
+2. Fit the primary stage, voice action, full-width activity row and the beginning of the shared conversation into the first desktop screen. Never let two large equal video tiles push interaction below the fold.
+3. Keep the primary voice action dominant. Place drawing, story and one unified play entry across the full width below the stage; the play entry reveals chess, an interaction game, piano and singing as large second-level choices. The keyboard form lives in a native expandable adult helper.
+4. Put completed history and the current live turn in one shared conversation feed and one scroll axis. Text, expressive icons and trusted media cards use the same message flow; persistence still waits for playback acknowledgement.
 5. The child’s closed-camera state explicitly says voice alone works. Camera preview requires an explicit action. Frame upload is separately intentional.
 6. AI identity is stated in the header and footer. Preserve Nathan’s real image and tested avatar decoder. Speaking bars communicate state; they are not a fake lip animation.
 7. During listening, the existing bars follow the microphone RMS already sampled by voice activity detection. They show loudness, never recognition confidence or correctness. Silence rests at a stable low height; a new listening segment, released input, or another state clears the previous level. Use transform-only motion, keep the existing speaking animation, and hold listening bars still under reduced motion. Do not add microphone access, polling, storage, or repeated accessibility announcements for this feedback.
 8. A requested activity begins with its first instruction or story sentence. Keep the child's name in welcomes, comfort, parent messages, and specific progress celebrations; do not add a separate name-only audio clip before every activity. Teaching questions and playback acknowledgement remain intact.
+9. Camera controls use three distinct symbols: a video-camera toggle that shows off/on state, a still-camera shutter, and a short-clip record symbol with visible recording progress. Do not use a play triangle for recording. These controls never change the explicit-capture privacy boundary.
+10. Reduce visible copy to the current state and the next action. Remove repeated headings, duplicated privacy captions and simultaneous status sentences; keep detailed privacy and setup explanations in the parent surface or native disclosure.
 
 ## Drawing surface
 

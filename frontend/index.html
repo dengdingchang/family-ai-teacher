@@ -6,9 +6,12 @@
     <meta name="color-scheme" content="light" />
     <title>爸爸老师 · 家庭 AI 教室</title>
     <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=20260906-child-interaction2" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-child-home" />
+    <link rel="stylesheet" href="/call-view.css?v=20260909-inline-pip" />
     <link rel="stylesheet" href="/drawing-board.css?v=20260906-2" />
     <link rel="stylesheet" href="/chess-board.css?v=20260906-1" />
+    <link rel="stylesheet" href="/music-studio.css?v=20260909-1" />
+    <link rel="stylesheet" href="/media-viewer.css?v=20260909-1" />
   </head>
   <body>
     <a class="skip-link" href="#recordButton">开始交流</a>
@@ -114,13 +117,7 @@
                 id="capturedFrame"
                 alt="最近一次手动截取的画面"
                 hidden
-              /><span class="frame-label child-label">我</span>
-            </div>
-            <div class="video-meta child-video-meta">
-              <div>
-                <strong>小小探索家</strong
-                ><span id="cameraStatus" role="status">摄像头还没打开</span>
-              </div>
+               /><span class="frame-label child-label">我</span>
               <div
                 id="cameraToolbar"
                 class="camera-toolbar"
@@ -128,13 +125,17 @@
               >
                 <button
                   id="cameraButton"
-                  class="camera-tool"
+                  class="camera-tool camera-toggle"
                   type="button"
                   aria-label="打开摄像头"
+                  aria-pressed="false"
                   title="打开摄像头"
                 >
-                  ◉</button
-                ><button
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 8h12v8H3V8Zm12 3 5-3v8l-5-3v-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                  </svg><span class="camera-state" aria-hidden="true">关</span>
+                </button>
+                <button
                   id="captureButton"
                   class="camera-tool"
                   type="button"
@@ -143,117 +144,27 @@
                   title="拍一张给爸爸看"
                 >
                   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M3 7h4l2-3h6l2 3h4v13H3V7Z"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                      stroke-linejoin="round"
-                    />
-                    <circle
-                      cx="12"
-                      cy="13"
-                      r="4"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                    />
-                  </svg></button
-                ><button
+                    <path d="M3 7h4l2-3h6l2 3h4v13H3V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                    <circle cx="12" cy="13" r="4" stroke="currentColor" stroke-width="1.8" />
+                  </svg>
+                </button>
+                <button
                   id="recordVideoButton"
-                  class="camera-tool"
+                  class="camera-tool record-video-tool"
                   type="button"
                   data-activity="vision_video"
                   disabled
                   aria-label="录一小段给爸爸看"
                   title="录一小段给爸爸看"
                 >
-                  ▷
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.8" />
+                    <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+                  </svg><span id="recordProgress" class="record-progress" aria-hidden="true"></span>
                 </button>
               </div>
             </div>
-            <section class="conversation-controls" aria-label="和爸爸老师交流">
-              <div class="voice-control">
-                <button
-                  id="recordButton"
-                  class="record-button"
-                  type="button"
-                  aria-pressed="false"
-                  aria-describedby="recordHint"
-                >
-                  <span class="record-icon" aria-hidden="true"></span
-                  ><span id="recordLabel">和爸爸老师说话</span>
-                </button>
-                <p id="recordHint" class="record-hint" aria-live="polite">
-                  点一下，说说你今天想做什么
-                </p>
-              </div>
-              <div class="activity-row" aria-label="快速开始一个活动">
-                <button
-                  class="activity-chip"
-                  type="button"
-                  data-activity="drawing"
-                  aria-label="打开全屏画板，和爸爸一起画"
-                  data-prompt="爸爸老师，带我一起画画吧。"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="m5 15 11-11 4 4L9 19l-5 1 1-5Z"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                      stroke-linejoin="round"
-                    />
-                    <path
-                      d="m13 7 4 4M5 15l4 4"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                    /></svg
-                  ><span>画画</span>
-                </button>
-                <button
-                  class="activity-chip"
-                  type="button"
-                  data-activity="story"
-                  aria-label="开始故事，用声音一起讲"
-                  data-prompt="爸爸老师，讲一个故事，我们一起接着讲吧。"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M12 6C9 3 5 4 3 5v15c3-2 6-2 9 0 3-2 6-2 9 0V5c-2-1-6-2-9 1Zm0 0v14"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                      stroke-linejoin="round"
-                    /></svg
-                  ><span>故事</span>
-                </button>
-                <button
-                  class="activity-chip"
-                  type="button"
-                  data-activity="game"
-                  aria-label="开始小游戏，用声音一起玩"
-                  data-prompt="爸爸老师，和我玩一个简单的小游戏吧。"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                      stroke-linejoin="round"
-                    /></svg
-                  ><span>小游戏</span>
-                </button>
-                <button
-                  class="activity-chip"
-                  type="button"
-                  data-activity="game"
-                  data-chess="true"
-                  aria-label="打开国际象棋，和爸爸一起学下棋"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M9 3h6l1 5-3 3 4 7H7l4-7-3-3 1-5ZM6 21h12M10 6h4"
-                      stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg><span>下棋</span>
-                </button>
-              </div>
-            </section>
+            <span id="cameraStatus" class="sr-only" role="status">摄像头还没打开</span>
           </article>
           <article class="video-tile dad-video">
             <div class="video-frame">
@@ -281,6 +192,25 @@
             </div>
           </article>
         </div>
+        <section class="conversation-controls" aria-label="和爸爸老师交流">
+          <div class="voice-control">
+            <button id="recordButton" class="record-button" type="button" aria-pressed="false" aria-describedby="recordHint">
+              <span class="record-icon" aria-hidden="true"></span><span id="recordLabel">和爸爸老师说话</span>
+            </button>
+            <p id="recordHint" class="record-hint" aria-live="polite">点一下，说说你今天想做什么</p>
+          </div>
+          <div class="activity-row" aria-label="选择一个活动">
+            <button class="activity-chip" type="button" data-activity="drawing" aria-label="打开画板，和爸爸一起画" data-prompt="爸爸老师，带我一起画画吧。"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M9 36l3-11L30 7l11 11-18 18-11 3-3-3Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="m27 10 11 11M12 25l11 11" stroke="currentColor" stroke-width="3"/></svg><span>画画</span></button>
+            <button class="activity-chip" type="button" data-activity="story" aria-label="开始故事，用声音一起讲" data-prompt="爸爸老师，讲一个故事，我们一起接着讲吧。"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M7 10c7-2 12 0 17 5v25c-5-5-10-7-17-5V10Zm34 0c-7-2-12 0-17 5v25c5-5 10-7 17-5V10Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M12 18h6m-6 7h7m17-7h-6m6 7h-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg><span>故事</span></button>
+            <button id="playButton" class="activity-chip play-button" type="button" aria-expanded="false" aria-controls="playChoices"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="7" y="8" width="14" height="14" rx="4" stroke="currentColor" stroke-width="3"/><circle cx="34" cy="15" r="7" stroke="currentColor" stroke-width="3"/><path d="m14 29 8 13H6l8-13Zm20 0 8 13H26l8-13Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg><span>玩一玩</span><span class="play-caret" aria-hidden="true">⌄</span></button>
+          </div>
+          <div id="playChoices" class="play-choices" hidden aria-label="选择玩法">
+            <button class="activity-chip play-choice" type="button" data-activity="game" data-chess="true"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M16 39h22M19 34h16l-2-10-12 2 8-7-3-8-11 9 6 5-2 9Z" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="16" r="1.8" fill="currentColor"/></svg><span>下棋</span></button>
+            <button class="activity-chip play-choice" type="button" data-activity="game" data-prompt="爸爸老师，和我玩一个简单的互动小游戏吧。"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="8" y="8" width="32" height="32" rx="9" stroke="currentColor" stroke-width="3"/><circle cx="17" cy="17" r="2.5" fill="currentColor"/><circle cx="31" cy="17" r="2.5" fill="currentColor"/><circle cx="17" cy="31" r="2.5" fill="currentColor"/><circle cx="31" cy="31" r="2.5" fill="currentColor"/></svg><span>互动游戏</span></button>
+            <button class="activity-chip play-choice" type="button" data-activity="music" data-music-mode="piano"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="6" y="9" width="36" height="30" rx="4" stroke="currentColor" stroke-width="3"/><path d="M15 10v28m9-28v28m9-28v28M12 10v15h7V10m10 0v15h7V10" stroke="currentColor" stroke-width="2.5"/></svg><span>钢琴</span></button>
+            <button class="activity-chip play-choice" type="button" data-activity="music" data-music-mode="sing"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="17" y="6" width="14" height="25" rx="7" stroke="currentColor" stroke-width="3"/><path d="M11 24c0 8 5 13 13 13s13-5 13-13M24 37v6m-8 0h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span>唱歌</span></button>
+          </div>
+        </section>
         <div class="stage-footer">
           <div class="avatar-caption" role="status">
             <span class="dot" aria-hidden="true"></span
@@ -304,8 +234,7 @@
           <span class="history-caption">往上滑，看看之前聊了什么</span>
         </div>
         <div class="chat-shell">
-          <div
-            id="chatHistory"
+          <div id="chatHistory"
             class="chat-history"
             tabindex="0"
             role="log"
@@ -315,13 +244,7 @@
             <p id="chatEmpty" class="chat-empty">
               还没有对话，先和爸爸老师说一句吧。
             </p>
-          </div>
-          <div
-            id="liveTurn"
-            class="chat-stream live-turn"
-            aria-live="polite"
-            hidden
-          >
+            <div id="liveTurn" class="chat-stream live-turn" aria-live="polite" hidden>
             <div class="chat-message child-message">
               <span class="chat-speaker">我</span>
               <p id="userTextBox">正在听你说…</p>
@@ -331,6 +254,7 @@
               <div id="answerBox" class="answer-box">
                 <span class="answer-label">正在想一个好玩的教法…</span>
               </div>
+            </div>
             </div>
           </div>
         </div>
@@ -359,6 +283,6 @@
         </details>
       </footer>
     </main>
-  <script type="module" src="/app.js?v=20260907-playback-clock"></script>
+  <script type="module" src="/app.js?v=20260909-media-cards"></script>
   </body>
 </html>

@@ -1,5 +1,7 @@
 # Family AI Teacher project rules
 
+- Start each continuation from `docs/current-stage.md` and `docs/2026-09-06_handoff.md`; keep the former as the current execution matrix and the latter as the cross-device handoff.
+
 - Keep this project a single local Windows application.
 - Read and reuse the existing Nathan TTS runtime; do not install another voice model without explicit approval.
 - Keep LLM, Vision, and future Memory services behind interfaces. Do not move models to this laptop.

@@ -2,6 +2,9 @@ import "/pcm-player.js?v=20260907-playback-clock";
 import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
 import "/drawing-board.js?v=20260906-3";
+import { CallView } from "/call-view.js?v=20260909-inline-pip";
+import { MusicStudio } from "/music-studio.js?v=20260909-1";
+import { MediaViewer } from "/media-viewer.js?v=20260909-1";
 
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
@@ -24,9 +27,57 @@ const avatarStage = document.querySelector("#avatarStage");
 const activityButtons = [...document.querySelectorAll(".activity-chip")];
 const childWelcome = document.querySelector("#childWelcome");
 const conversationTitle = document.querySelector("#conversationTitle");
+const playButton = document.querySelector("#playButton");
+const playChoices = document.querySelector("#playChoices");
 const defaultEnabledActivities = ["drawing", "story", "game", "music", "vision_photo", "vision_video"];
 let enabledActivities = new Set(defaultEnabledActivities);
 let childProfileLoaded = false;
+let mediaConversationWasActive = false;
+let mediaPlaybackGeneration = 0;
+let mediaResumePending = false;
+let pageIsLeaving = false;
+
+async function resumeConversationAfterMedia(generation) {
+  const until = performance.now() + 1800;
+  while (activeRequestController && performance.now() < until) {
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  if (generation !== mediaPlaybackGeneration || !mediaResumePending) return;
+  mediaResumePending = false;
+  if (conversationActive && !conversationStarting && !activeRequestController
+      && !segmentRecording && mediaViewer.openKind !== "video") beginContinuousSegment();
+}
+
+const mediaViewer = new MediaViewer({
+  container: document.createElement("div"),
+  onOpen(kind) {
+    if (kind !== "video") return;
+    mediaPlaybackGeneration += 1;
+    mediaResumePending = false;
+    mediaConversationWasActive = conversationActive;
+    if (activeRequestController) {
+      interruptedRequestController = activeRequestController;
+      void cancelConversationTurn(activeTurnId);
+      activeRequestController.abort();
+    }
+    stopVadLoop();
+    stopBargeInMonitor();
+    segmentRecording = false;
+    segmentShouldSend = false;
+    segmentPcmChunks = [];
+    clearResponseQueue();
+    cancelPlayback();
+  },
+  onClose(kind) {
+    if (kind === "video" && mediaConversationWasActive && !pageIsLeaving) {
+      mediaResumePending = true;
+      void resumeConversationAfterMedia(mediaPlaybackGeneration);
+    }
+    mediaConversationWasActive = false;
+  },
+});
+const mediaSuggestionGroups = [];
+if (avatarStage) new CallView(avatarStage.closest(".stage-card"));
 
 let recordingStream = null;
 let audioContext = null;
@@ -78,6 +129,9 @@ let activeRequestController = null;
 let activeRequestSource = "";
 let drawingBoard = null;
 let chessBoard = null;
+let musicStudio = null;
+let musicSpeechController = null;
+let musicConversationWasActive = false;
 let chessSpeechController = null;
 let chessSpeechGeneration = 0;
 let chessOpenGeneration = 0;
@@ -141,36 +195,83 @@ function formatHistoryTime(value) {
   });
 }
 
+function buildMediaHistoryTurn(group) {
+  const turn = document.createElement("article");
+  turn.className = "history-turn media-history-turn";
+  const message = document.createElement("div");
+  message.className = "chat-message dad-message media-history-message";
+  const label = document.createElement("span");
+  label.className = "chat-speaker";
+  label.textContent = "爸爸老师";
+  const heading = document.createElement("p");
+  heading.className = "media-history-heading";
+  heading.textContent = "找到可以一起看的图片和视频";
+  const cards = document.createElement("div");
+  cards.className = "media-history-cards";
+  message.append(label, heading, cards);
+  turn.append(message);
+  mediaViewer.container = cards;
+  mediaViewer.appendCards(group.cards);
+  return turn;
+}
+
+async function loadMediaSuggestions(query) {
+  const text = String(query || "").replace(/\s+/g, "");
+  const topics = [
+    ["刷牙", ["刷牙", "牙刷", "牙齿", "牙齒"]], ["恐龙", ["恐龙", "恐龍", "霸王龙", "暴龍"]],
+    ["月亮", ["月亮", "月球"]], ["太空", ["太空", "宇宙", "星球"]], ["鱼", ["鱼", "魚"]],
+    ["钢琴", ["钢琴", "鋼琴", "琴键", "琴鍵"]], ["红绿灯", ["红绿灯", "紅綠燈", "交通灯", "交通燈"]],
+  ];
+  const topic = topics.find(([, aliases]) => aliases.some(alias => text.includes(alias)))?.[0] || "";
+  if (!topic) return;
+  try {
+    const response = await fetch("/api/media/suggestions", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    const returnedTopic = String(payload.topic || "");
+    if (!response.ok || returnedTopic !== topic || !Array.isArray(payload.cards) || !payload.cards.length
+        || mediaSuggestionGroups.some(group => group.topic === returnedTopic)) return;
+    mediaSuggestionGroups.push({ topic: returnedTopic, cards: payload.cards });
+    renderHistory();
+  } catch (_) {
+    // Learning cards are optional; voice and local activities stay available.
+  }
+}
+
 function renderHistory() {
   if (!chatHistory) return;
   chatHistory.replaceChildren();
   const visibleRecords = historyRecords.filter((record) => (
     String(record?.user_text || "").trim() || String(record?.assistant_text || "").trim()
   ));
-  if (!visibleRecords.length) {
+  if (!visibleRecords.length && !mediaSuggestionGroups.length) {
     chatEmpty.hidden = false;
     chatEmpty.textContent = "还没有对话，先和爸爸老师说一句吧。";
     chatHistory.append(chatEmpty);
-    return;
-  }
-  chatEmpty.hidden = true;
-  for (const record of visibleRecords) {
-    const turn = document.createElement("article");
-    turn.className = "history-turn";
-    const timestamp = formatHistoryTime(record.created_at);
-    if (timestamp) {
-      const time = document.createElement("time");
-      time.className = "history-time";
-      time.dateTime = record.created_at;
-      time.textContent = timestamp;
-      turn.append(time);
+  } else {
+    chatEmpty.hidden = true;
+    for (const record of visibleRecords) {
+      const turn = document.createElement("article");
+      turn.className = "history-turn";
+      const timestamp = formatHistoryTime(record.created_at);
+      if (timestamp) {
+        const time = document.createElement("time");
+        time.className = "history-time";
+        time.dateTime = record.created_at;
+        time.textContent = timestamp;
+        turn.append(time);
+      }
+      turn.append(
+        historyMessage("child-message", "我", String(record.user_text || "").trim()),
+        historyMessage("dad-message", "爸爸老师", String(record.assistant_text || "").trim()),
+      );
+      chatHistory.append(turn);
     }
-    turn.append(
-      historyMessage("child-message", "我", String(record.user_text || "").trim()),
-      historyMessage("dad-message", "爸爸老师", String(record.assistant_text || "").trim()),
-    );
-    chatHistory.append(turn);
+    for (const group of mediaSuggestionGroups) chatHistory.append(buildMediaHistoryTurn(group));
   }
+  // The current turn is part of this same scrolling log, never a second feed.
+  chatHistory.append(liveTurn);
   scrollHistoryToLatest();
 }
 
@@ -203,14 +304,17 @@ async function loadHistory() {
 }
 
 function resetLiveTurn() {
+  if (!liveTurn.parentElement || liveTurn.parentElement !== chatHistory) chatHistory.append(liveTurn);
   liveTurn.hidden = false;
   userTextBox.textContent = "正在听你说…";
   answerBox.classList.remove("has-answer");
   answerBox.innerHTML = '<span class="answer-label">正在想一个好玩的教法…</span>';
+  scrollHistoryToLatest();
 }
 
 function hideLiveTurn() {
   liveTurn.hidden = true;
+  scrollHistoryToLatest();
 }
 
 function setStatus(message, state = "idle") {
@@ -224,6 +328,16 @@ function setStatus(message, state = "idle") {
     drawingBoard.setVoiceState(["listening", "thinking", "speaking"].includes(visualState) ? visualState : "paused");
   }
 }
+
+window.addEventListener("family-audio-playback", (event) => {
+  const detail = event.detail || {};
+  if (Number.isInteger(detail.generation) && detail.generation !== queueGeneration) return;
+  if (detail.type === "scheduled") {
+    setStatus(avatarReady ? "爸爸老师正在说话…" : "爸爸老师正在说话 · 动作暂时离线", "speaking");
+  } else if (detail.type === "cancelled" && avatarStage?.dataset.state === "speaking") {
+    setStatus("爸爸老师暂停了", "idle");
+  }
+});
 
 function resetListeningLevel() {
   avatarStage?.style?.removeProperty("--listening-level");
@@ -758,6 +872,9 @@ async function playAudioPayload(payload, generation) {
     let settled = false;
     const onEnded = () => {
       if (trackInteraction && generation === queueGeneration) globalThis.familyInteractionClock?.playbackEnded(timingSessionId);
+      if (typeof window !== "undefined" && typeof CustomEvent === "function") {
+        window.dispatchEvent(new CustomEvent("family-audio-playback", { detail: { type: "ended", generation, transport: "html-audio" } }));
+      }
       finish();
     };
     const onError = () => finish(new Error("audio playback failed"));
@@ -781,7 +898,10 @@ async function playAudioPayload(payload, generation) {
     activePlayback = { audio, finish };
     audio.addEventListener("ended", onEnded, { once: true });
     audio.addEventListener("error", onError, { once: true });
-    audio.play().catch(finish);
+    audio.play().then(() => {
+      if (generation !== queueGeneration || typeof window === "undefined" || typeof CustomEvent !== "function") return;
+      window.dispatchEvent(new CustomEvent("family-audio-playback", { detail: { type: "scheduled", generation, transport: "html-audio" } }));
+    }).catch(finish);
   });
   await playbackPromise;
 }
@@ -1029,6 +1149,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
   let receivedDone = false;
   let chessRequested = false;
   let chessContextGeneration = null;
+  let childTurnText = "";
   try {
     const audioStreaming = typeof prepareStreamingAudio === "function" && await prepareStreamingAudio();
     if ((endpoint === "/api/conversation/stream" || endpoint === "/api/conversation/text/stream")
@@ -1066,17 +1187,16 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
         } else if (event.event === "user_text") {
           if (source !== "drawing-observation" && String(event.text || "").trim()) globalThis.familyInteractionClock?.confirmInput(timingSessionId);
           if (userTextBox) userTextBox.textContent = event.text || "刚刚说了一句话";
+          childTurnText = String(event.text || "").trim();
         } else if (event.event === "assistant_delta") {
           assistantText += event.text || "";
           answerBox.classList.add("has-answer");
           answerBox.textContent = assistantText;
           onText?.(assistantText);
-          setStatus("爸爸老师正在想一想…", "thinking");
+          // Text can arrive after audio has actually started. Do not let a late
+          // delta overwrite the playback-owned speaking state.
+          if (avatarStage?.dataset.state !== "speaking") setStatus("爸爸老师正在想一想…", "thinking");
         } else if (event.event === "audio") {
-          setStatus(
-            avatarReady ? "爸爸老师正在说话…" : "爸爸老师正在说话 · 动作暂时离线",
-            "speaking",
-          );
           enqueueAudio(event, playbackGeneration);
         } else if (event.event === "vision_context") {
           setStatus("爸爸老师看到了刚才的画面…", "thinking");
@@ -1177,6 +1297,7 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
       drawingBoard.close();
     }
     hideLiveTurn();
+    if (source !== "drawing-observation") void loadMediaSuggestions(`${childTurnText} ${assistantText}`);
     stopBargeInMonitor();
     if (continuous && conversationActive) beginContinuousSegment();
     else setStatus("回答完成", "idle");
@@ -1602,6 +1723,126 @@ function cancelChessExplanation(resumeListening = false) {
       && !activeRequestController && !segmentRecording) beginContinuousSegment();
 }
 
+function cancelMusicExplanation(resumeListening = false) {
+  const controller = musicSpeechController;
+  musicSpeechController = null;
+  controller?.abort();
+  if (resumeListening && conversationActive && !conversationStarting
+      && !activeRequestController && !segmentRecording) beginContinuousSegment();
+}
+
+async function speakMusicInstruction(text) {
+  cancelMusicExplanation();
+  const instruction = String(text || "").trim();
+  if (!musicStudio?.opened || !activityEnabled("music")) return { ok: false, aborted: true };
+  if (activeRequestController || conversationStarting) {
+    return { ok: false, error: "爸爸先把刚才的话说完，琴键还可以继续玩。" };
+  }
+  if (!instruction || instruction.length > 240) return { ok: false, error: "先看亮起来的琴键吧。" };
+  const controller = new AbortController();
+  musicSpeechController = controller;
+  let timeout = null;
+  try {
+    stopVadLoop();
+    stopBargeInMonitor();
+    segmentRecording = false;
+    segmentShouldSend = false;
+    segmentPcmChunks = [];
+    clearResponseQueue();
+    cancelPlayback();
+    const playbackGeneration = queueGeneration;
+    activeRequestController = controller;
+    activeRequestSource = "music-explanation";
+    activeTurnId = null;
+    setBusy(true);
+    setStatus("爸爸老师正在准备音乐示范…", "thinking");
+    timeout = setTimeout(() => controller.abort(), 30000);
+    const response = await fetch("/api/tts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: instruction }), signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (musicSpeechController !== controller || controller.signal.aborted
+        || playbackGeneration !== queueGeneration) return { ok: false, aborted: true };
+    if (!response.ok || !payload?.audio_base64) throw new Error("music voice unavailable");
+    clearTimeout(timeout);
+    timeout = null;
+    setStatus("爸爸老师正在示范…", "speaking");
+    await playAudioPayload(payload, playbackGeneration);
+    if (musicSpeechController !== controller || controller.signal.aborted) return { ok: false, aborted: true };
+    return { ok: true };
+  } catch (_) {
+    if (controller.signal.aborted || musicSpeechController !== controller) return { ok: false, aborted: true };
+    return { ok: false, error: "声音没播出来，琴键仍然可以继续玩。" };
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+    if (activeRequestController === controller) {
+      clearResponseQueue();
+      cancelPlayback();
+      activeRequestController = null;
+      activeRequestSource = "";
+      setBusy(false);
+    }
+    if (musicSpeechController === controller) musicSpeechController = null;
+    if (!conversationActive && !activeRequestController) setStatus("轮到你玩音乐", "idle");
+  }
+}
+
+async function acquireMusicMicrophone() {
+  if (!recordingStream?.active) await startContinuousConversation();
+  stopVadLoop();
+  stopBargeInMonitor();
+  segmentRecording = false;
+  segmentShouldSend = false;
+  segmentPcmChunks = [];
+  return recordingStream;
+}
+
+async function transcribeMusicRecording(blob) {
+  const body = new FormData();
+  body.append("audio", blob, "singing.webm");
+  const response = await fetch("/api/transcribe", { method: "POST", body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error("transcription unavailable");
+  return String(payload.text || "");
+}
+
+function getMusicStudio() {
+  if (musicStudio) return musicStudio;
+  musicStudio = new MusicStudio({
+    onSpeak: speakMusicInstruction,
+    acquireMicrophone: acquireMusicMicrophone,
+    transcribe: transcribeMusicRecording,
+    onClose: () => {
+      cancelMusicExplanation();
+      if (!pageIsLeaving && musicConversationWasActive && conversationActive && !activeRequestController) beginContinuousSegment();
+      else if (!pageIsLeaving && !musicConversationWasActive && conversationActive) stopContinuousConversation();
+      musicConversationWasActive = false;
+    },
+  });
+  return musicStudio;
+}
+
+async function openMusicActivity(mode) {
+  if (!activityEnabled("music")) return;
+  cancelChessExplanation();
+  chessBoard?.close();
+  drawingBoard?.close();
+  await interruptActiveReply().catch(() => {});
+  if (!activityEnabled("music")) return;
+  musicConversationWasActive = conversationActive;
+  stopVadLoop();
+  stopBargeInMonitor();
+  segmentRecording = false;
+  segmentShouldSend = false;
+  segmentPcmChunks = [];
+  const studio = getMusicStudio();
+  studio.open();
+  studio.setMode(mode === "sing" ? "sing" : "piano");
+  playChoices.hidden = true;
+  playButton?.setAttribute("aria-expanded", "false");
+}
+
 async function speakChessInstruction(text) {
   cancelChessExplanation();
   const instruction = String(text || "").trim();
@@ -1788,17 +2029,42 @@ async function openDrawingActivity(button) {
   }
 }
 
+playButton?.addEventListener("click", () => {
+  const expanded = playButton.getAttribute("aria-expanded") === "true";
+  playButton.setAttribute("aria-expanded", String(!expanded));
+  playChoices.hidden = expanded;
+});
+
 for (const button of activityButtons) {
-  button.addEventListener("click", () => void (button.dataset.chess === "true" ? openChessActivity()
-    : button.dataset.activity === "drawing" ? openDrawingActivity(button) : startActivityConversation(button)));
+  if (button === playButton) continue;
+  button.addEventListener("click", () => {
+    void (button.dataset.musicMode ? openMusicActivity(button.dataset.musicMode)
+      : button.dataset.chess === "true" ? openChessActivity()
+      : button.dataset.activity === "drawing" ? openDrawingActivity(button) : startActivityConversation(button));
+  });
 }
-window.addEventListener("pagehide", () => { chessOpenGeneration += 1; cancelChessExplanation(); });
+function handlePageHide() {
+  pageIsLeaving = true;
+  mediaPlaybackGeneration += 1;
+  mediaResumePending = false;
+  mediaConversationWasActive = false;
+  musicConversationWasActive = false;
+  chessOpenGeneration += 1;
+  cancelChessExplanation();
+  cancelMusicExplanation();
+  musicStudio?.destroy();
+  mediaViewer.destroy();
+}
+
+window.addEventListener("pagehide", handlePageHide);
 
 const cameraVideo = document.querySelector("#cameraVideo");
 const cameraToolbar = document.querySelector("#cameraToolbar");
 const cameraButton = document.querySelector("#cameraButton");
 const captureButton = document.querySelector("#captureButton");
 const recordVideoButton = document.querySelector("#recordVideoButton");
+const cameraState = document.querySelector(".camera-state");
+const recordProgress = document.querySelector("#recordProgress");
 const cameraStatus = document.querySelector("#cameraStatus");
 const captureState = document.querySelector("#captureState");
 const captureCanvas = document.querySelector("#captureCanvas");
@@ -1812,6 +2078,7 @@ let videoRecordingGeneration = 0;
 let videoRequestController = null;
 let videoChunks = [];
 let videoStopTimer = null;
+let videoProgressTimer = null;
 const MANUAL_VIDEO_MAX_MS = 6000;
 
 async function loadChildProfileControls() {
@@ -1837,12 +2104,23 @@ async function loadChildProfileControls() {
     else return;
   }
   for (const button of activityButtons) {
+    if (button === playButton) continue;
     button.hidden = !activityEnabled(String(button.dataset.activity || ""));
   }
   if (drawingBoard?.isOpen && !activityEnabled("drawing")) drawingBoard.close();
   if (chessBoard?.isOpen && !activityEnabled("game")) chessBoard.close();
+  if (musicStudio?.opened && !activityEnabled("music")) musicStudio.close();
   const activityRow = document.querySelector(".activity-row");
-  if (activityRow) activityRow.hidden = activityButtons.every((button) => button.hidden);
+  const playableChoiceAvailable = activityButtons.some((button) => button !== playButton
+    && button.dataset.activity !== "drawing" && button.dataset.activity !== "story" && !button.hidden);
+  if (playButton) playButton.hidden = !playableChoiceAvailable;
+  if (!playableChoiceAvailable && playChoices) {
+    playChoices.hidden = true;
+    playButton?.setAttribute("aria-expanded", "false");
+  }
+  if (activityRow) activityRow.hidden = activityButtons
+    .filter((button) => button === playButton || button.dataset.activity === "drawing" || button.dataset.activity === "story")
+    .every((button) => button.hidden);
   captureButton.hidden = !activityEnabled("vision_photo");
   recordVideoButton.hidden = !activityEnabled("vision_video");
   const visionEnabled = activityEnabled("vision_photo") || activityEnabled("vision_video");
@@ -1859,11 +2137,13 @@ function setCameraActionState(open) {
   captureButton.disabled = !activityEnabled("vision_photo");
   recordVideoButton.disabled = !activityEnabled("vision_video") || !open || !window.MediaRecorder;
   if (!videoRecorder || videoRecorder.state !== "recording") {
-    recordVideoButton.textContent = "▷";
+    setVideoRecordingVisual(false);
     recordVideoButton.title = "录一小段给爸爸看";
     recordVideoButton.setAttribute("aria-label", "录一小段给爸爸看");
   }
-  cameraButton.textContent = open ? "■" : "◉";
+  cameraButton.dataset.open = String(open);
+  cameraButton.setAttribute("aria-pressed", String(open));
+  if (cameraState) cameraState.textContent = open ? "开" : "关";
   cameraButton.title = open ? "关闭摄像头" : "打开摄像头";
   cameraButton.setAttribute("aria-label", open ? "关闭摄像头" : "打开摄像头");
 }
@@ -2009,6 +2289,14 @@ function supportedVideoMimeType() {
   ].find((type) => MediaRecorder.isTypeSupported?.(type)) || "";
 }
 
+function setVideoRecordingVisual(recording, elapsedMs = 0) {
+  if (recording) recordVideoButton.classList.add("recording");
+  else recordVideoButton.classList.remove("recording");
+  const progress = recording ? Math.min(100, Math.round((elapsedMs / MANUAL_VIDEO_MAX_MS) * 100)) : 0;
+  recordVideoButton.style?.setProperty("--record-progress", String(progress));
+  if (typeof recordProgress !== "undefined" && recordProgress) recordProgress.style.setProperty("--record-progress", String(progress));
+}
+
 async function startVideoRecording() {
   if (!activityEnabled("vision_video")) throw new Error("爸爸暂时关闭了短视频活动");
   if (!window.MediaRecorder) throw new Error("当前浏览器不支持短视频录制");
@@ -2041,8 +2329,7 @@ async function startVideoRecording() {
     chunks.length = 0;
     videoChunks = [];
     videoRecorder = null;
-    recordVideoButton.classList.remove("recording");
-    recordVideoButton.textContent = "▷";
+    setVideoRecordingVisual(false);
     setCameraActionState(Boolean(cameraStream?.active));
     if (recordingFailed) {
       cameraStatus.textContent = "短视频录制失败，请再试一次";
@@ -2093,17 +2380,23 @@ async function startVideoRecording() {
     }
   };
   recorder.start(250);
-  recordVideoButton.classList.add("recording");
-  recordVideoButton.textContent = "■";
+  const recordingStartedAt = Date.now();
+  setVideoRecordingVisual(true, 0);
   recordVideoButton.title = "停止录制并给爸爸看";
   recordVideoButton.setAttribute("aria-label", "停止录制并给爸爸看");
   cameraStatus.textContent = "正在录制 · 最长6秒";
+  if (typeof clearInterval === "function") clearInterval(videoProgressTimer);
+  if (typeof setInterval === "function") {
+    videoProgressTimer = setInterval(() => setVideoRecordingVisual(true, Date.now() - recordingStartedAt), 100);
+  }
   videoStopTimer = setTimeout(stopVideoRecording, MANUAL_VIDEO_MAX_MS);
 }
 
 function stopVideoRecording(discard = false) {
   clearTimeout(videoStopTimer);
   videoStopTimer = null;
+  if (typeof clearInterval === "function") clearInterval(videoProgressTimer);
+  videoProgressTimer = null;
   const recorder = videoRecorder;
   if (discard) {
     videoRecordingGeneration++;
@@ -2111,8 +2404,7 @@ function stopVideoRecording(discard = false) {
     videoRequestController = null;
     videoChunks.length = 0;
     videoRecorder = null;
-    recordVideoButton.classList.remove("recording");
-    recordVideoButton.textContent = "▷";
+    setVideoRecordingVisual(false);
     setCameraActionState(Boolean(cameraStream?.active));
   }
   if (recorder && recorder.state !== "inactive") recorder.stop();

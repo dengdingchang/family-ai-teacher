@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from avatar.control import StreamingAvatarControl
 from app.repetition import RepeatedQuestionGuard
+from app.media import TrustedMediaSearch
 from camera.adapter import BrowserCameraAdapter, CameraAdapterError
 from llm.client import LLMError, LLMNotConfiguredError, OpenAICompatibleClient
 from memory.store import DEFAULT_ENABLED_ACTIVITIES, MemoryStore
@@ -81,6 +82,7 @@ if settings.tts_mode == "streaming":
     tts = local_tts
 llm = OpenAICompatibleClient(settings)
 camera = BrowserCameraAdapter()
+media_search = TrustedMediaSearch()
 
 app = FastAPI(title="Family AI Teacher", version="0.3.0")
 logger = logging.getLogger(__name__)
@@ -192,6 +194,10 @@ class TextRequest(BaseModel):
     chess_context: str = Field(default="", max_length=3000)
 
 
+class MediaSuggestionRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=16)
+
+
 class InteractionIntervalRequest(BaseModel):
     session_id: str = Field(min_length=32, max_length=36)
     sequence: int = Field(strict=True, gt=0, le=9007199254740991)
@@ -206,6 +212,8 @@ class ProfileUpdateRequest(BaseModel):
     interests: list[str] | None = None
     teaching_preferences: list[str] | None = None
     learning_goals: list[str] | None = None
+    daily_guidance: str | None = Field(default=None, max_length=120)
+    daily_guidance_date: str | None = Field(default=None, max_length=10)
     teacher_style: str | None = Field(default=None, max_length=32)
     content_boundaries: list[str] | None = None
     enabled_activities: list[str] | None = None
@@ -241,6 +249,18 @@ class FamilyDataDeleteRequest(BaseModel):
     confirmation: str = Field(min_length=1, max_length=48)
 
 
+def _active_daily_guidance(profile: dict[str, Any] | None) -> str:
+    if not isinstance(profile, dict):
+        return ""
+    if str(profile.get("daily_guidance_date", "")).strip() != datetime.now().astimezone().date().isoformat():
+        return ""
+    return " ".join(str(profile.get("daily_guidance", "")).strip().split())[:120]
+
+
+def _profile_for_client(profile: dict[str, Any]) -> dict[str, Any]:
+    return {**profile, "daily_guidance_active": bool(_active_daily_guidance(profile))}
+
+
 def _system_prompt(
     profile: dict[str, Any],
     learning_events: list[dict[str, Any]],
@@ -255,7 +275,11 @@ def _system_prompt(
         "playful": "更活泼，多用模仿和小游戏，但不要吵闹或夸张",
         "calm": "语气平静、节奏慢、句子更短",
     }
-    profile_json = json.dumps(profile, ensure_ascii=False)
+    active_guidance = _active_daily_guidance(profile)
+    profile_json = json.dumps(
+        {key: value for key, value in profile.items() if key not in {"daily_guidance", "daily_guidance_date"}},
+        ensure_ascii=False,
+    )
     events_json = json.dumps(learning_events[-4:], ensure_ascii=False)
     memories_json = json.dumps(
         [{"summary": item.get("summary", ""), "source": item.get("source", "unknown"),
@@ -289,7 +313,8 @@ def _system_prompt(
         f"孩子常用昵称：{nickname or '宝贝'}。只在开场、安慰、切换活动或具体庆祝进步时自然称呼；连续对话不要每轮叫昵称。\n"
         f"爸爸选择的教学语气：{teacher_style}。\n"
         f"爸爸当前的学习目标：{learning_goals}。\n"
-        f"允许的可选活动：{enabled_activities}；没有允许的活动不要主动发起。\n"
+        + (f"爸爸今天希望自然引导的主题：{active_guidance}。一次只带一个小动作，不机械复述设置；孩子明确换话题时先回应孩子。\n" if active_guidance else "")
+        + f"允许的可选活动：{enabled_activities}；没有允许的活动不要主动发起。\n"
         f"爸爸设定的内容边界：{content_boundaries}；必须遵守，不要向孩子复述设置文字。\n"
         "你必须主动教学，不是被动应答。先真正回应孩子刚说的内容，再教一个小知识或给一个动作，最后通常问一个孩子能马上回答的问题。"
         "孩子说想学某个主题时，立刻开始第一小步；孩子答对或模仿后，简短表扬并继续下一小步。"
@@ -1081,6 +1106,25 @@ def _welcome_back_turn(
     profile: dict[str, Any] | None,
 ) -> tuple[str, dict[str, Any] | None]:
     nickname = _child_nickname(profile) or "宝贝"
+    daily_guidance = _active_daily_guidance(profile)
+    if daily_guidance:
+        if "刷牙" in daily_guidance:
+            # CDC guidance for ages 3–6: fluoride toothpaste, pea-sized amount,
+            # spit it out, and an adult helps or watches the child brush.
+            return (
+                _compact_assistant_text(
+                    f"{nickname}，今天一起练刷牙。请大人挤豌豆大的含氟牙膏，我们先找到牙刷好吗？",
+                    max_chars=64,
+                ),
+                None,
+            )
+        return (
+            _compact_assistant_text(
+                f"{nickname}，爸爸今天想陪你试试{daily_guidance}。我们先做第一小步，好吗？",
+                max_chars=64,
+            ),
+            None,
+        )
     try:
         cue = memory.get_continuity_cue()
     except OSError as exc:
@@ -1572,7 +1616,9 @@ def _activity_turn_reply_unchecked(
         if review_activity in {"english", "colors", "numbers"}:
             requested, start_requested = review_activity, True
             request_text = f"{request_text} {review_text}".strip()
-    if any(phrase in topic for phrase in ("我回来了", "我回來了", "我回来啦", "我回來啦", "我来啦", "我來啦")):
+    if (not start_requested and any(
+        phrase in topic for phrase in ("我回来了", "我回來了", "我回来啦", "我回來啦", "我来啦", "我來啦")
+    )):
         return _welcome_back_turn(profile)
     if any(phrase in topic for phrase in ("你看", "看看", "看我", "看这个")):
         return _explicit_lesson_reply(user_text, profile), None
@@ -2614,14 +2660,30 @@ async def llm_health() -> dict[str, Any]:
 
 @app.get("/api/profile")
 async def get_child_profile() -> dict[str, Any]:
-    return memory.get_child_profile()
+    return _profile_for_client(memory.get_child_profile())
+
+
+@app.post("/api/media/suggestions")
+async def media_suggestions(
+    request: MediaSuggestionRequest,
+) -> dict[str, Any]:
+    """Return learning cards for a client-canonicalized allowlisted topic."""
+    return await asyncio.to_thread(media_search.search, request.topic)
 
 
 @app.patch("/api/profile")
 async def update_child_profile(request: ProfileUpdateRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     try:
         previous_name = _child_nickname(memory.get_child_profile())
-        profile = memory.update_child_profile(request.model_dump(exclude_none=True))
+        updates = request.model_dump(exclude_none=True)
+        if "daily_guidance" in updates:
+            updates["daily_guidance_date"] = (
+                datetime.now().astimezone().date().isoformat()
+                if str(updates["daily_guidance"]).strip() else ""
+            )
+        else:
+            updates.pop("daily_guidance_date", None)
+        profile = memory.update_child_profile(updates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     nickname = _child_nickname(profile)
@@ -2629,7 +2691,7 @@ async def update_child_profile(request: ProfileUpdateRequest, background_tasks: 
         # This only uses the already loaded local Nathan voice. It does not call
         # AI Station, start another model, or block the Mac settings response.
         background_tasks.add_task(_prewarm_nickname, nickname)
-    return profile
+    return _profile_for_client(profile)
 
 
 @app.post("/api/transcribe")
@@ -2795,16 +2857,22 @@ def _explicit_visual_request(text: str) -> bool:
 
 
 def _explicit_chess_request(text: str) -> bool:
-    compact = re.sub(r"[\s，,。！!？?]", "", text).translate(
-        str.maketrans({"國": "国", "際": "际", "學": "学", "師": "师", "來": "来"})
-    )
+    clauses = [
+        re.sub(r"\s", "", clause).translate(
+            str.maketrans({"國": "国", "際": "际", "學": "学", "師": "师", "來": "来"})
+        )
+        for clause in re.split(r"[，,。！!？?；;]", text)
+        if clause.strip()
+    ]
     # Only an affirmative instruction opens UI. Do not repair guessed ASR words,
-    # historical statements, negations, or questions about the game.
-    return bool(re.fullmatch(
+    # historical statements, negations, or questions about the game. A greeting
+    # may precede the explicit request in a separate spoken clause.
+    request = re.compile(
         r"(?:爸爸(?:老师)?|老师)?(?:请)?(?:我(?:想|要)(?:要)?(?:学|玩|下)|"
         r"教我(?:学|玩|下)?|带我(?:学|玩|下)|我们(?:来|一起)?(?:学|玩|下)|"
-        r"开始(?:学|玩|下)|打开)(?:一下)?国际象棋(?:吧|呀|好吗|可以吗)?", compact,
-    ))
+        r"开始(?:学|玩|下)|打开)(?:一下)?(?:国际象棋|棋)(?:吧|呀|好吗|可以吗)?"
+    )
+    return any(request.fullmatch(clause) for clause in clauses)
 
 
 def _chess_request_response(text: str) -> StreamingResponse | None:
