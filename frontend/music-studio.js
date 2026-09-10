@@ -180,11 +180,12 @@ export class MusicStudio {
     this.turnButton = this._button("轮到我唱", () => void this.startSinging(), "music-studio__turn"); controls.append(this.demoButton, this.nextButton, this.slowButton, this.themeButton, this.turnButton);
     this.feedback = this._node("p", "music-studio__feedback"); this.feedback.setAttribute("aria-live", "polite");
     this.themeScene = this._node("div", "music-studio__theme-scene"); this.themeScene.hidden = true;
+    this.themeStatus = this._node("p", "music-studio__theme-status"); this.themeStatus.hidden = true; this.themeStatus.setAttribute("role", "status");
     this.privacy = this._node("p", "music-studio__privacy", "跟唱只在点“轮到我唱”后短暂使用麦克风，声音不保存。");
-    content.append(this.lessonHeading, this.instruction, controls, this.themeChoices, this.themeScene, this.beatTrack, this.rhythmStage, this.keyboard, this.feedback, this.privacy); this.element.append(header, modes, content); this.doc.body.append(this.element); this._syncReference(); this._render();
+    content.append(this.lessonHeading, this.instruction, controls, this.themeChoices, this.themeStatus, this.themeScene, this.beatTrack, this.rhythmStage, this.keyboard, this.feedback, this.privacy); this.element.append(header, modes, content); this.doc.body.append(this.element); this._syncReference(); this._render();
   }
   open() { if (this.destroyed || this.opened) return this; this.opened = true; this.focusBefore = this.doc.activeElement; this.overflowBefore = this.doc.body.style.overflow; this.doc.body.style.overflow = "hidden"; this.element.hidden = false; this._render(); this.back.focus({ preventScroll: true }); this._setListeningAllowed(true); return this; }
-  close() { if (!this.opened) return; this.opened = false; this.generation++; this.themeGeneration++; this._clearDemo(); this._cancelRecording(); this._setListeningAllowed(false); this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore; try { this.onClose(); } finally { if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true }); } }
+  close() { if (!this.opened) return; this.opened = false; this.generation++; this.themeGeneration++; this._themeStatus(""); this._clearDemo(); this._cancelRecording(); this._setListeningAllowed(false); this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore; try { this.onClose(); } finally { if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true }); } }
   destroy() { this.close(); this.destroyed = true; this.doc.removeEventListener("keydown", this._keydown, true); this.doc.removeEventListener("visibilitychange", this._visibility); this.context?.close?.(); this.element.remove(); }
   setMode(mode) { if (!this.opened || !["piano", "sing", "rhythm"].includes(mode)) return; this.generation++; this._clearDemo(); this._cancelRecording(); this.mode = mode; this.performance = []; this.journey.resetAttempt(); this.feedback.textContent = ""; this._syncReference(); this._render(); this._setListeningAllowed(true); }
   _setListeningAllowed(allowed) {
@@ -236,10 +237,12 @@ export class MusicStudio {
     const index = MUSIC_THEMES.findIndex(theme => theme.id === id);
     this.themeIndex = index >= 0 ? index : (this.themeIndex + 1) % MUSIC_THEMES.length;
     const theme = MUSIC_THEMES[this.themeIndex], token = ++this.themeGeneration;
+    this._themeStatus("");
     this.themeChoices.hidden = true; this.themeButton.setAttribute("aria-expanded", "false"); this._renderTheme();
     this.feedback.textContent = `换成${theme.title}啦，琴键位置还是一样的。`;
     if (theme.subject && !this.themeArtwork.has(theme.id)) {
       this.feedback.textContent = this.onThemeRequest ? `正在准备${theme.title}主题预览，先用基础音符玩。` : `${theme.title}主题预览还没准备好，先用基础音符玩。`;
+      this._themeStatus(this.feedback.textContent);
       if (this.onThemeRequest) Promise.resolve().then(() => {
         if (!this.opened || token !== this.themeGeneration) return null;
         return this.onThemeRequest(theme.subject, {
@@ -248,12 +251,16 @@ export class MusicStudio {
       }).then(result => {
         if (token !== this.themeGeneration || !this.opened) return;
         const url = typeof result === "string" ? result : result?.url;
-        if (url) this.setThemeArtwork(theme.subject, url);
+        if (!url || !this.setThemeArtwork(theme.subject, url)) throw new Error("theme_unavailable");
       }).catch(() => {
-        if (this.opened && token === this.themeGeneration) this.feedback.textContent = `${theme.title}图片这次没准备好，音乐仍然可以继续玩。`;
+        if (this.opened && token === this.themeGeneration) {
+          this.feedback.textContent = `${theme.title}图片这次没准备好，音乐仍然可以继续玩。`;
+          this._themeStatus(this.feedback.textContent);
+        }
       });
     }
   }
+  _themeStatus(text) { this.themeStatus.textContent = text; this.themeStatus.hidden = !text; }
   setThemeArtwork(subject, url) {
     const theme = MUSIC_THEMES[this.themeIndex]; if (!this.opened || theme.subject !== subject) return false;
     let source;
@@ -263,7 +270,7 @@ export class MusicStudio {
       if (!["http:", "https:"].includes(parsed.protocol) || parsed.origin !== origin || parsed.username || parsed.password) return false;
       source = parsed.href;
     } catch (_) { return false; }
-    this.themeArtwork.set(theme.id, source); this._renderTheme(); this.feedback.textContent = `${theme.title}主题预览准备好了，找相同的小图标来弹琴。`; return true;
+    this.themeArtwork.set(theme.id, source); this._themeStatus(""); this._renderTheme(); this.feedback.textContent = `${theme.title}主题预览准备好了，找相同的小图标来弹琴。`; return true;
   }
   _renderTheme() {
     const theme = MUSIC_THEMES[this.themeIndex]; this.element.dataset.theme = theme.id;
@@ -291,7 +298,7 @@ export class MusicStudio {
     image.addEventListener("error", () => {
       if (this.themeArtwork.get(theme.id) !== source) return;
       this.themeArtwork.delete(theme.id);
-      if (this.opened && MUSIC_THEMES[this.themeIndex].id === theme.id) { this._renderTheme(); this.feedback.textContent = `${theme.title}图片暂时打不开，先用基础音符继续玩。`; }
+      if (this.opened && MUSIC_THEMES[this.themeIndex].id === theme.id) { this._renderTheme(); this.feedback.textContent = `${theme.title}图片暂时打不开，先用基础音符继续玩。`; this._themeStatus(this.feedback.textContent); }
     }, { once: true }); return image;
   }
   _showBeats(done, active = -1) { this.beats.forEach((beat, index) => { beat.className = `music-studio__beat${index < done ? " is-done" : ""}${index === active ? " is-active" : ""}`; }); }

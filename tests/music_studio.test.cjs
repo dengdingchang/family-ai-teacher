@@ -323,6 +323,9 @@ test("theme previews use host art only, reject foreign/stale URLs, and keep play
   try {
     f.studio.handleVoiceCommand("换成奥特曼主题"); await new Promise(resolve => setImmediate(resolve));
     assert.equal(requests[0].subject, "奥特曼"); assert.match(f.studio.feedback.textContent, /正在准备奥特曼/);
+    f.studio.keys.get("C4").dispatch("click");
+    assert.match(f.studio.themeStatus.textContent, /正在准备奥特曼/);
+    assert.equal(f.studio.themeStatus.hidden, false, "playing must not erase pending theme status");
     f.studio.changeTheme("animals"); finish({ url: "/api/media/generated/old.png" }); await new Promise(resolve => setImmediate(resolve));
     assert.equal(requests[0].meta.isCurrent(), false); assert.equal(f.studio.themeArtwork.size, 0);
     f.studio.changeTheme("ultraman");
@@ -334,6 +337,7 @@ test("theme previews use host art only, reject foreign/stale URLs, and keep play
     assert.equal(key.children[0].tagName, "SPAN"); assert.equal(scene.tagName, "IMG"); assert.match(scene.alt, /主题预览/);
     assert.equal(new Set([...f.studio.keys.values()].map(node => node.children[0].textContent)).size, 5);
     scene.dispatch("error"); assert.equal(f.studio.themeArtwork.size, 0); assert.equal(f.studio.themeScene.hidden, true);
+    f.studio.keys.get("D4").dispatch("click"); assert.match(f.studio.themeStatus.textContent, /图片暂时打不开/);
     f.studio.close(); assert.equal(f.studio.setThemeArtwork("奥特曼", "/api/media/generated/late.png"), false);
   } finally { f.studio.destroy(); }
 });
