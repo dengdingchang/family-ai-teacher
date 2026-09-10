@@ -34,9 +34,15 @@ async (page) => {
     const move = async (from, to, touch = false) => {
       for (const square of [from, to]) await page.locator(`[data-square="${square}"]`)[touch ? "tap" : "click"]();
     };
-    for (const [width, height] of [[1400, 900], [390, 844], [320, 700]]) {
+    for (const [width, height] of [[1400, 900], [1280, 854], [1240, 656], [390, 844], [320, 700]]) {
       await page.setViewportSize({ width, height }); await page.evaluate(() => qaSetup());
-      await page.locator("#open").click(); await move("e2", "e3", width < 500);
+      await page.locator("#open").click();
+      if (width >= 900) {
+        const fit = await page.evaluate(() => { const r=board.grid.getBoundingClientRect(), s=board.cells.get("e2").cell.getBoundingClientRect(); return {full:r.y>=0 && r.bottom<=innerHeight, square:s.width}; });
+        check(fit.full && fit.square>=48, "desktop board must fit without tiny squares");
+        await page.screenshot({path:`${root}/output/playwright/chess-layout-${width}x${height}.png`});
+      }
+      await move("e2", "e3", width < 500);
       check(await page.evaluate(() => !board.celebration.hidden && board.confettiAnimations.length === 20), "completion burst missing");
       // A pointer double-click and voice arriving together must consume only this completed lesson.
       await page.locator(".chess-board__continue").dblclick();
@@ -58,7 +64,7 @@ async (page) => {
           duplicateIgnored: burst === board.confetti && count === speech.length,
           label: board.continueButton.textContent, color: getComputedStyle(board.continueButton).backgroundColor };
       });
-      check(layout.accessible && layout.inViewport && layout.noOverflow && layout.duplicateIgnored, "layout or repeat failure");
+      check(layout.accessible && layout.inViewport && layout.noOverflow && layout.duplicateIgnored, `layout or repeat failure ${width}: ${JSON.stringify(layout)}`);
       await page.screenshot({ path: `${root}/output/playwright/chess-celebration-${width}x${height}.png` });
       await page.waitForFunction(() => !board.confetti && board.confettiAnimations.length === 0);
       await page.keyboard.press("Tab"); await page.keyboard.press("Tab");
@@ -86,4 +92,3 @@ async (page) => {
     return { status: "PASS", results, reducedMotion: true, closeReopenDestroy: true, errors, blocked, boundary: "Static checkout modules only; synthetic onSpeak and avatar; no server, API, family data, models or physical devices used." };
   } finally { await context.close(); }
 }
-

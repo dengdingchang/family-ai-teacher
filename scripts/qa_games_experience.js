@@ -1,9 +1,9 @@
 // Playwright CLI callback. Run in a fresh, dedicated QA browser session:
 // npx --no-install --package @playwright/cli playwright-cli -s=music-qa open about:blank
 // npx --no-install --package @playwright/cli playwright-cli -s=music-qa run-code --filename scripts/qa_games_experience.js
-// Close that session afterwards. Requires the local app's static server on port 8760.
+// Close that session afterwards. Routes read only the root checkout's static files.
 // All family APIs, narration and theme art are fixtures; physical media is denied.
-// Only the existing avatar/idle GET media may reach the app. No family data is written.
+// Avatar/idle media are synthetic too. No requests reach the running app.
 // Practice storage is disabled so viewport runs cannot inherit one another's progress.
 async (page) => {
   const root = "C:/Users/user/.codex/worktrees/13e8/family-ai-teacher";

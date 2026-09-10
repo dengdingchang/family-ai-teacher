@@ -30,3 +30,8 @@
   .has-avatar-companion .drawing-board__heading p { display: none; }
 }
 .has-avatar-companion > :is(.music-studio__header,.chess-board__header) { min-height: var(--companion-safe-height, 235px); padding-right: var(--companion-safe-width, 180px); align-items: flex-start; }
+@media (min-width: 900px) {
+  :is(.chess-board,.music-studio).has-avatar-companion { box-sizing: border-box; padding-right: var(--companion-safe-width, 180px); }
+  .has-avatar-companion > :is(.music-studio__header,.chess-board__header) { min-height: 0; padding-right: 24px; }
+  .chess-board.has-avatar-companion > .chess-board__content { grid-template-columns: minmax(0, min(560px, calc(100dvh - 220px))) minmax(230px, 330px); }
+}

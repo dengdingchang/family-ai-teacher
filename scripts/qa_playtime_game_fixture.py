@@ -15,5 +15,7 @@ with tempfile.TemporaryDirectory() as folder:
             rounds.append({'text':text,'reply':reply,'transition':transition})
             store.apply_activity_transition(transition)
     assert rounds[-1]['transition']=={'action':'clear'},rounds
-    Path('runtime/playtime-game-fixture.json').write_text(json.dumps(rounds,ensure_ascii=False),encoding='utf-8')
+    output=Path(__file__).resolve().parents[1]/'runtime'/'playtime-game-fixture.json'
+    output.parent.mkdir(parents=True,exist_ok=True)
+    output.write_text(json.dumps(rounds,ensure_ascii=False),encoding='utf-8')
     print(json.dumps({'rounds':len(rounds),'final':rounds[-1]['transition']}))

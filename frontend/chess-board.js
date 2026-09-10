@@ -80,6 +80,10 @@ export class ChessBoard {
   }
   _build() {
     this.element = this._node("section", "chess-board"); this.element.hidden = true;
+    // A second click after the modal disappears can otherwise hit a tool underneath.
+    this.element.addEventListener("click", event => {
+      if (event.detail > 1) { event.preventDefault(); event.stopPropagation(); }
+    }, true);
     this.element.setAttribute("role", "dialog"); this.element.setAttribute("aria-modal", "true");
     this.element.setAttribute("aria-label", "和爸爸学国际象棋");
     const header = this._node("header", "chess-board__header");

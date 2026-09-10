@@ -97,6 +97,7 @@ export class AvatarCompanion {
   resize(delta) { this.width += delta; this.place(); }
   place() {
     this.width=Math.min(Math.max(148,this.width),Math.min(480,innerWidth-24));
+    if (innerWidth >= 900 && this.host?.matches('.chess-board,.music-studio')) this.width=Math.min(this.width,Math.min(280,innerWidth*.22));
     const height=this.width*0.75+100;
     this.position.left=Math.max(8,Math.min(this.position.left,innerWidth-this.width-8));
     this.position.top=Math.max(8,Math.min(this.position.top,innerHeight-height-8));
