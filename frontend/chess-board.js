@@ -58,12 +58,12 @@ export class ChessBoard {
       if (!this.isOpen) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this.close(); }
       else if (event.key === "Tab") {
-        const controls = [...this.element.querySelectorAll("button")].filter(node => !node.disabled && !node.hidden && node.tabIndex >= 0);
+        const controls = this.celebration && !this.celebration.hidden ? [this.continueButton, this.celebrationBack] : [...this.element.querySelectorAll("button")].filter(node => node !== this.continueButton && node !== this.celebrationBack && !node.disabled && !node.hidden && node.tabIndex >= 0);
         if (event.shiftKey && doc.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
         else if (!event.shiftKey && doc.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus(); }
       }
     };
-    this._visibility = () => { this._cancelAi(); if (!doc.hidden) this._scheduleAi(); };
+    this._visibility = () => { this._cancelAi(); if (doc.hidden) this._clearConfetti(); else this._scheduleAi(); };
     this._fullscreen = () => { if (this.ownsFullscreen && doc.fullscreenElement !== this.element) this.close(); };
     doc.addEventListener("keydown", this._keydown, true);
     doc.addEventListener("visibilitychange", this._visibility);
@@ -136,6 +136,53 @@ export class ChessBoard {
     tools.append(this.hintButton, this.repeatButton, this.undoButton, this.resetButton, this.nextButton);
     panel.append(this.lessonTitle, this.turnLabel, this.feedback, tools, this.speechStatus);
     content.append(boardArea, panel); this.element.append(header, modes, content); this.doc.body.append(this.element);
+    this.activityParts = [header, modes, content];
+    this.celebration = this._node("div", "chess-board__celebration"); this.celebration.hidden = true;
+    this.celebration.setAttribute("role", "dialog"); this.celebration.setAttribute("aria-modal", "true");
+    this.celebration.setAttribute("aria-label", "太棒啦！过关了");
+    const card = this._node("div", "chess-board__success-card");
+    const trophy = this._node("div", "chess-board__trophy", "🏆"); trophy.setAttribute("aria-hidden", "true");
+    this.successText = this._node("p", "chess-board__achievement");
+    this.continueButton = this._button("下一课 →", () => this.nextLesson(), "chess-board__continue");
+    this.celebrationBack = this._button("返回", () => this.close());
+    card.append(trophy, this._node("h2", "", "太棒啦！"), this.successText, this.continueButton, this.celebrationBack);
+    this.celebration.append(card); this.element.append(this.celebration);
+    this.confettiAnimations = []; this.confetti = null;
+  }
+
+  _clearConfetti() {
+    for (const animation of this.confettiAnimations) animation.cancel();
+    this.confettiAnimations = []; this.confetti?.remove(); this.confetti = null;
+  }
+  _hideCelebration() {
+    this._clearConfetti(); this.celebration.hidden = true;
+    for (const part of this.activityParts) part.inert = false;
+  }
+  _showCelebration(animate = true) {
+    if (!this.celebration.hidden) return;
+    const last = this.lessonIndex === LESSONS.length - 1;
+    this.successText.textContent = last ? "兵、车和马，三课都完成啦！" : LESSONS[this.lessonIndex].achievement;
+    this.continueButton.textContent = last ? "再学一遍 ↻" : "下一课 →";
+    this.celebration.hidden = false;
+    for (const part of this.activityParts) part.inert = true;
+    this.continueButton.focus({ preventScroll: true });
+    if (!animate || this.win.matchMedia?.("(prefers-reduced-motion: reduce)").matches || !this.celebration.animate) return;
+    const confetti = this.confetti = this._node("div", "chess-board__confetti");
+    confetti.setAttribute("aria-hidden", "true"); this.celebration.append(confetti);
+    // A bounded burst, transform/opacity only: no canvas, frame loop or new dependency.
+    for (let i = 0; i < 20; i++) {
+      const ribbon = this._node("i", "");
+      ribbon.style.left = `${(i * 37) % 100}%`;
+      ribbon.style.background = ["#d62929", "#e6ad20", "#205844", "#4081c3"][i % 4];
+      confetti.append(ribbon);
+      this.confettiAnimations.push(ribbon.animate([
+        { transform: "translateY(-24px) rotate(0deg)", opacity: 1 },
+        { transform: `translateY(${this.win.innerHeight + 24}px) rotate(${i % 2 ? 320 : -320}deg)`, opacity: 0 },
+      ], { duration: 1500 + i % 4 * 150, delay: i % 5 * 50, easing: "ease-out" }));
+    }
+    Promise.allSettled(this.confettiAnimations.map(animation => animation.finished)).then(() => {
+      if (this.confetti === confetti) this._clearConfetti();
+    });
   }
 
   open() {
@@ -148,11 +195,14 @@ export class ChessBoard {
         if (!this.isOpen && this.ownsFullscreen) Promise.resolve(this.doc.exitFullscreen?.()).catch(() => {});
       }).catch(() => {}); } catch (_) { /* Full-viewport overlay remains usable. */ }
     }
-    this._speak(); return this;
+    this._speak();
+    if (this.mode === "learn" && this.lessonComplete) this._showCelebration(false);
+    return this;
   }
   close() {
     if (!this.isOpen) return;
     this.isOpen = false; this.speechGeneration++; this.speaking = false; this._cancelAi(); this.selected = null;
+    this._hideCelebration();
     this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore;
     if (this.doc.fullscreenElement === this.element) {
       try { Promise.resolve(this.doc.exitFullscreen?.()).catch(() => {}); } catch (_) {}
@@ -174,6 +224,7 @@ export class ChessBoard {
   }
   reset() {
     if (!this.isOpen) return;
+    this._hideCelebration();
     this._cancelAi(); this.selected = null; this.hintMove = null; this.lessonComplete = false;
     if (this.mode === "learn") this.game.load(LESSONS[this.lessonIndex].fen); else this.game.reset();
     this._setGuidance(this.mode === "learn" ? "source" : "none");
@@ -181,7 +232,8 @@ export class ChessBoard {
   }
   nextLesson() {
     if (!this.isOpen || this.mode !== "learn" || !this.lessonComplete) return;
-    this.lessonIndex = (this.lessonIndex + 1) % LESSONS.length; this.reset();
+    this.lessonIndex = this.lessonIndex === LESSONS.length - 1 ? 0 : this.lessonIndex + 1; this.reset();
+    this.cells.get(LESSONS[this.lessonIndex].from).cell.focus({ preventScroll: true });
   }
   handleVoiceCommand(value) {
     if (!this.isOpen || this.destroyed) return false;
@@ -297,7 +349,8 @@ export class ChessBoard {
     this.selected = null; this.hintMove = null;
     if (this.mode === "learn") {
       this.lessonComplete = true; this._setGuidance("complete");
-      this._say(`${LESSONS[this.lessonIndex].praise}${this._moveText(move)}${this.lessonIndex < 2 ? "准备好可以说‘下一课’，我们再认识一颗棋子。" : "兵、车和马都试过了。你可以说‘再学一遍’，或者‘和爸爸下棋’。"}`);
+      this._showCelebration();
+      this._say(`${LESSONS[this.lessonIndex].praise}${this._moveText(move)}${this.lessonIndex < 2 ? "准备好可以点或说‘下一课’，我们再认识一颗棋子。" : "兵、车和马都试过了。你可以点或说‘再学一遍’，或者说‘和爸爸下棋’。"}`);
     }
     else { this._setGuidance("none"); this._say(this._moveText(move) + (this._ending() || "现在轮到爸爸的黑棋。")); this._scheduleAi(); }
     return true;

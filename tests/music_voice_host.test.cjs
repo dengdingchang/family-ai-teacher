@@ -146,3 +146,16 @@ test("an old music request cannot release a newer request or restart listening o
   assert.equal(f.c.activeRequestSource, "new child question");
   assert.equal(f.resumes, 0);
 });
+
+test("closing music cancels an already playing introduction, not only its finished fetch", async () => {
+  const f = fixture(), studio = f.prepareDemo();
+  const speech = f.c.speakMusicInstruction("正在播放的音乐开场");
+  f.response.resolve({ ok: true, json: async () => ({ audio_base64: "RAM fixture" }) });
+  await tick(); assert.equal(f.audioPlays, 1);
+  let cancelled = false;
+  f.c.cancelPlayback = () => { cancelled = true; f.playback.resolve(); };
+  studio.close();
+  try { assert.equal(cancelled, true, "close must release the active audio wait"); }
+  finally { f.playback.resolve(); await speech; }
+  assert.equal(f.c.activeRequestController, null);
+});

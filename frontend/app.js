@@ -3,8 +3,8 @@ import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
 import "/drawing-board.js?v=20260910-1";
 import { CallView } from "/call-view.js?v=20260910-1";
-import { AvatarCompanion } from "/avatar-companion.js?v=20260910-1";
-import { MusicStudio, parseMusicVoiceCommand } from "/music-studio.js?v=20260910-journey2";
+import { AvatarCompanion } from "/avatar-companion.js?v=20260910-playtime";
+import { MusicStudio, parseMusicVoiceCommand } from "/music-studio.js?v=20260910-playtime";
 import { MediaViewer } from "/media-viewer.js?v=20260910-replay";
 import { chooseMediaSuggestion } from "/media-intent.js?v=20260910-open";
 
@@ -1936,6 +1936,10 @@ function cancelMusicExplanation(resumeListening = false) {
   const controller = musicSpeechController;
   musicSpeechController = null;
   controller?.abort();
+  if (controller && activeRequestController === controller) {
+    clearResponseQueue();
+    cancelPlayback();
+  }
   if (resumeListening && conversationActive && !conversationStarting
       && !activeRequestController && !segmentRecording) beginContinuousSegment();
 }
@@ -2233,7 +2237,7 @@ async function openChessActivity() {
   try {
     if (typeof globalThis.ChessBoard !== "function") {
       await Promise.race([
-        import("/chess-board.js?v=20260910-feedback"),
+        import("/chess-board.js?v=20260910-playtime"),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("chess module timeout")), 5000); }),
       ]);
     }

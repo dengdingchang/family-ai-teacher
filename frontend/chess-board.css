@@ -50,6 +50,19 @@
 .chess-board__tools .chess-board__button { flex: 1 1 calc(50% - 5px); }
 .chess-board__button[hidden] { display: none; }
 .chess-board__speech { color: #60746c; font-size: 14px; line-height: 1.5; margin-bottom: 0; }
+.chess-board__celebration { position: fixed; inset: 0; z-index: 30000; display: grid; place-items: center; padding: 16px; overflow-y: auto; background: #173e3666; }
+.chess-board__celebration[hidden] { display: none; }
+.chess-board__success-card { position: relative; z-index: 1; width: min(100%, 420px); max-height: 100%; overflow-y: auto; padding: 28px 24px; border: 3px solid #e6ad20; border-radius: 24px; background: #fffdf5; text-align: center; box-shadow: 0 12px 48px #173e3633; }
+.chess-board__trophy { font-size: 68px; line-height: 1.2; }
+.chess-board__success-card h2 { margin: 12px 0; font-size: 32px; }
+.chess-board__achievement { margin: 12px 0 24px; line-height: 1.6; font-size: 19px; }
+.chess-board__success-card .chess-board__button { display: block; width: 100%; }
+.chess-board__continue { min-height: 68px; margin-bottom: 12px; color: white; background: #d62929; border-color: #d62929; font-size: 26px; }
+.chess-board__continue:hover:not(:disabled) { background: #b71d1d; }
+.chess-board__confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.chess-board__confetti i { position: absolute; top: 0; width: 9px; height: 18px; }
+/* The existing companion may have been dragged over the action: the modal stays above it. */
+.chess-board:has(.chess-board__celebration:not([hidden])) > .avatar-companion { pointer-events: none; }
 @media (max-width: 760px) {
   .chess-board__header { padding-left: 12px; padding-right: 12px; gap: 12px; }
   .chess-board__heading h2 { font-size: 20px; }

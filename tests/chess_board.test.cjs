@@ -47,6 +47,29 @@ async function fixture(options = {}) {
 function point(square) {
   return { x: (square.charCodeAt(0) - 97) * 100 + 50, y: (8 - Number(square[1])) * 100 + 50 };
 }
+
+test("completion dialog keeps click and voice advancement idempotent and final restart explicit", async () => {
+  const f = await fixture(); f.board.open();
+  try {
+    f.click("e2"); f.click("e3");
+    assert.equal(f.board.celebration.hidden, false);
+    assert.equal(f.doc.activeElement, f.board.continueButton);
+    const count = f.speech.length;
+    f.click("e3"); assert.equal(f.speech.length, count);
+    f.board.continueButton.dispatch("click"); f.board.continueButton.dispatch("click");
+    f.board.handleVoiceCommand("下一课");
+    assert.equal(f.board.lessonIndex, 1); assert.equal(f.board.celebration.hidden, true);
+    f.click("d4"); f.click("d7"); f.board.handleVoiceCommand("下一课");
+    f.click("d4"); f.click("f5");
+    assert.match(f.board.continueButton.textContent, /再学一遍/);
+    assert.match(f.board.successText.textContent, /三课都完成/);
+    f.board.close(); f.board.open();
+    assert.equal(f.board.celebration.hidden, false);
+    assert.equal(f.board.confetti, null);
+    f.board.continueButton.dispatch("click"); f.board.continueButton.dispatch("click");
+    assert.equal(f.board.lessonIndex, 0); assert.equal(f.board.lessonComplete, false);
+  } finally { f.board.destroy(); }
+});
 function assertVisiblePath(board, move) {
   const from = point(move.from), to = point(move.to);
   assert.equal(board.guidancePhase, "path");

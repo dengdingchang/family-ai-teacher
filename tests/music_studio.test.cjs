@@ -330,8 +330,10 @@ test("theme previews use host art only, reject foreign/stale URLs, and keep play
     assert.equal(f.studio.setThemeArtwork("奥特曼", "javascript:alert(1)"), false);
     assert.equal(f.studio.setThemeArtwork("奶龙", "/api/media/generated/theme.png"), false);
     assert.equal(f.studio.setThemeArtwork("奥特曼", "/api/media/generated/theme.png"), true);
-    const key = f.studio.keys.get("C4"); assert.equal(key.children[0].tagName, "IMG"); assert.match(key.children[0].alt, /主题预览/);
-    key.children[0].dispatch("error"); assert.equal(f.studio.themeArtwork.size, 0); assert.equal(key.children[0].tagName, "SPAN");
+    const key = f.studio.keys.get("C4"), scene = f.studio.themeScene.children[0];
+    assert.equal(key.children[0].tagName, "SPAN"); assert.equal(scene.tagName, "IMG"); assert.match(scene.alt, /主题预览/);
+    assert.equal(new Set([...f.studio.keys.values()].map(node => node.children[0].textContent)).size, 5);
+    scene.dispatch("error"); assert.equal(f.studio.themeArtwork.size, 0); assert.equal(f.studio.themeScene.hidden, true);
     f.studio.close(); assert.equal(f.studio.setThemeArtwork("奥特曼", "/api/media/generated/late.png"), false);
   } finally { f.studio.destroy(); }
 });

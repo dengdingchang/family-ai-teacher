@@ -1,5 +1,5 @@
 // Local music activity: only a small UI-practice record is stored, never family assessments or media.
-import { MusicJourney, MUSIC_THEMES, MUSIC_PROGRESS_KEY } from "./music-curriculum.js?v=20260910-journey2";
+import { MusicJourney, MUSIC_THEMES, MUSIC_PROGRESS_KEY } from "./music-curriculum.js?v=20260910-playtime";
 import { MusicRhythmRound } from "./music-rhythm.js?v=20260910-journey2";
 
 const NOTES = [
@@ -179,8 +179,9 @@ export class MusicStudio {
     this.themeControls = MUSIC_THEMES.map(theme => { const control = this._button(theme.subject ? `${theme.title} · 预览` : theme.title, () => this.changeTheme(theme.id)); this.themeChoices.append(control); return control; });
     this.turnButton = this._button("轮到我唱", () => void this.startSinging(), "music-studio__turn"); controls.append(this.demoButton, this.nextButton, this.slowButton, this.themeButton, this.turnButton);
     this.feedback = this._node("p", "music-studio__feedback"); this.feedback.setAttribute("aria-live", "polite");
+    this.themeScene = this._node("div", "music-studio__theme-scene"); this.themeScene.hidden = true;
     this.privacy = this._node("p", "music-studio__privacy", "跟唱只在点“轮到我唱”后短暂使用麦克风，声音不保存。");
-    content.append(this.lessonHeading, this.instruction, controls, this.themeChoices, this.beatTrack, this.rhythmStage, this.keyboard, this.feedback, this.privacy); this.element.append(header, modes, content); this.doc.body.append(this.element); this._syncReference(); this._render();
+    content.append(this.lessonHeading, this.instruction, controls, this.themeChoices, this.themeScene, this.beatTrack, this.rhythmStage, this.keyboard, this.feedback, this.privacy); this.element.append(header, modes, content); this.doc.body.append(this.element); this._syncReference(); this._render();
   }
   open() { if (this.destroyed || this.opened) return this; this.opened = true; this.focusBefore = this.doc.activeElement; this.overflowBefore = this.doc.body.style.overflow; this.doc.body.style.overflow = "hidden"; this.element.hidden = false; this._render(); this.back.focus({ preventScroll: true }); this._setListeningAllowed(true); return this; }
   close() { if (!this.opened) return; this.opened = false; this.generation++; this.themeGeneration++; this._clearDemo(); this._cancelRecording(); this._setListeningAllowed(false); this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore; try { this.onClose(); } finally { if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true }); } }
@@ -262,24 +263,27 @@ export class MusicStudio {
       if (!["http:", "https:"].includes(parsed.protocol) || parsed.origin !== origin || parsed.username || parsed.password) return false;
       source = parsed.href;
     } catch (_) { return false; }
-    this.themeArtwork.set(theme.id, source); this._renderTheme(); this.feedback.textContent = `${theme.title}主题预览准备好了，找相同形状来弹琴。`; return true;
+    this.themeArtwork.set(theme.id, source); this._renderTheme(); this.feedback.textContent = `${theme.title}主题预览准备好了，找相同的小图标来弹琴。`; return true;
   }
   _renderTheme() {
     const theme = MUSIC_THEMES[this.themeIndex]; this.element.dataset.theme = theme.id;
     this.themeButton.textContent = theme.subject ? `${theme.title} · 主题` : `${theme.symbols[0]} 换主题`;
     this.themeControls.forEach((control, index) => control.setAttribute("aria-pressed", String(index === this.themeIndex)));
     const artwork = this.themeArtwork.get(theme.id);
+    this.themeScene.hidden = !artwork || this.mode === "sing";
+    if (this.sceneArtwork !== artwork) {
+      this.sceneArtwork = artwork; this.themeScene.replaceChildren();
+      if (artwork) this.themeScene.append(this._themeImage(artwork, "music-studio__scene-art", `${theme.title}主题预览`));
+    }
     for (const [index, note] of NOTES.entries()) {
       const key = this.keys.get(note.id); key.replaceChildren();
-      if (artwork) key.append(this._themeImage(artwork, "music-studio__key-art", `${theme.title}主题预览`));
-      key.append(this._node("span", "music-studio__key-label", artwork ? `${theme.symbols[index]} ${note.label}\n${note.key.toUpperCase()}` : `${theme.symbols[index]}\n${note.label}\n${note.key.toUpperCase()}`));
+      key.append(this._node("span", "music-studio__key-label", `${theme.symbols[index]}\n${note.label}\n${note.key.toUpperCase()}`));
     }
     this.tokens.forEach((token, index) => this._renderToken(token, index));
   }
   _renderToken(token, index) {
     const theme = MUSIC_THEMES[this.themeIndex], symbol = theme.symbols[NOTES.findIndex(note => note.id === this.reference[index])];
-    const artwork = this.themeArtwork.get(theme.id); token.replaceChildren();
-    if (artwork) token.append(this._themeImage(artwork, "music-studio__token-art", ""));
+    token.replaceChildren();
     token.append(this._node("span", "music-studio__token-symbol", symbol));
   }
   _themeImage(source, className, alt) {

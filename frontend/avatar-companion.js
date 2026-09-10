@@ -82,6 +82,10 @@ export class AvatarCompanion {
       if (host) {
         host.classList.add('has-avatar-companion');
         this.body.append(this.frame); host.append(this.panel); this.panel.hidden=false;
+        if (host.matches('.chess-board,.music-studio')) {
+          this.width = 148;
+          this.position = {left:innerWidth-this.width-16,top:12};
+        }
         if (!this.position) this.position={left:innerWidth-this.width-16,top:innerWidth<=640?12:100};
       } else {
         this.anchor.after(this.frame); this.panel.hidden=true; this.panel.remove();
@@ -96,6 +100,19 @@ export class AvatarCompanion {
     const height=this.width*0.75+100;
     this.position.left=Math.max(8,Math.min(this.position.left,innerWidth-this.width-8));
     this.position.top=Math.max(8,Math.min(this.position.top,innerHeight-height-8));
+    if (this.host?.matches('.chess-board,.music-studio')) {
+      this.host.style.setProperty('--companion-safe-height', `${height + 24}px`);
+      this.host.style.setProperty('--companion-safe-width', `${this.width + 32}px`);
+      // Keep dragging/resizing, but don't let Dad cover a board, piano key or action.
+      const overlaps = [...this.host.querySelectorAll('button,.chess-board__grid,.music-studio__rhythm')]
+        .filter(node => !this.panel.contains(node) && node.getClientRects().length)
+        .some(node => {
+          const r = node.getBoundingClientRect();
+          return this.position.left < r.right && this.position.left + this.width > r.left
+            && this.position.top < r.bottom && this.position.top + height > r.top;
+        });
+      if (overlaps) this.position={left:innerWidth-this.width-16,top:12};
+    }
     Object.assign(this.panel.style,{width:`${this.width}px`,left:`${this.position.left}px`,top:`${this.position.top}px`});
   }
   destroy() {

@@ -25,9 +25,12 @@ export const MUSIC_THEMES = Object.freeze([
   // Named previews are opt-in. Art is supplied by the host, never bundled or fetched here.
   // A home-use theme selection is not a claim of rights for public/commercial release.
   ...[
-    ["ultraman", "奥特曼"], ["nailong", "奶龙"], ["plants-zombies", "植物大战僵尸"],
-    ["minecraft", "Minecraft"], ["mini-force", "迷你特工队"],
-  ].map(([id, title]) => Object.freeze({ id, title, subject: title, symbols: ["●", "▲", "■", "◆", "⬟"] })),
+    ["ultraman", "奥特曼", ["⭐", "🚀", "🪐", "⚡", "🛡️"]],
+    ["nailong", "奶龙", ["🥚", "🐾", "🍎", "🌈", "🎈"]],
+    ["plants-zombies", "植物大战僵尸", ["🌻", "🌱", "🍄", "🌽", "🧟"]],
+    ["minecraft", "Minecraft", ["🌳", "🪨", "⛏️", "💎", "🏠"]],
+    ["mini-force", "迷你特工队", ["🚗", "🚁", "⚡", "🛡️", "⭐"]],
+  ].map(([id, title, symbols]) => Object.freeze({ id, title, subject: title, symbols })),
 ]);
 
 export function compareMusicPhrase(played, reference, durations = reference.map(() => 1)) {

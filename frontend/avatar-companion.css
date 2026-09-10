@@ -20,6 +20,8 @@
 .avatar-companion__tools button { flex: 1; }
 .avatar-companion__tools button:last-child { touch-action: none; cursor: nwse-resize; }
 .media-viewer.has-avatar-companion .media-viewer__close { left: max(16px, env(safe-area-inset-left)); right: auto; }
+.music-studio.has-avatar-companion { overflow: hidden; }
+.music-studio.has-avatar-companion > .music-studio__content { min-height: 0; overflow-y: auto; flex: 1; }
 @media (max-width: 640px) {
   .has-avatar-companion > .music-studio__header,
   .has-avatar-companion > .chess-board__header,
@@ -27,3 +29,4 @@
   .has-avatar-companion .music-studio__heading p,
   .has-avatar-companion .drawing-board__heading p { display: none; }
 }
+.has-avatar-companion > :is(.music-studio__header,.chess-board__header) { min-height: var(--companion-safe-height, 235px); padding-right: var(--companion-safe-width, 180px); align-items: flex-start; }
