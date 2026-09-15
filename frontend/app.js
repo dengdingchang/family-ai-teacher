@@ -2126,7 +2126,9 @@ async function openMusicActivity(mode) {
   studio.setMode(mode === "sing" ? "sing" : "piano");
   playChoices.hidden = true;
   playButton?.setAttribute("aria-expanded", "false");
-  if (!conversationActive && !conversationStarting) {
+  // Piano must remain immediately playable without a microphone permission
+  // prompt. Singing still prepares voice input on entry.
+  if (mode === "sing" && !conversationActive && !conversationStarting) {
     try { await startContinuousConversation({ shouldContinue: () => studio.opened && activityEnabled("music") && !pageIsLeaving }); }
     catch (_) { if (studio.opened) studio.feedback.textContent = "麦克风没打开，仍然可以点琴键玩。"; }
   }

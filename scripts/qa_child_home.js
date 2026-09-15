@@ -66,7 +66,7 @@ async (page) => {
   await page.screenshot({ path: "output/playwright/music-studio-390x844.png", fullPage: false });
   await page.goto("about:blank");
   const pass = results.every(result => result.before.primary.width > result.before.secondary.width
-    && result.before.feedCount === 1 && !result.before.overflow && result.before.conversationVisible >= 60
+    && result.before.feedCount === 1 && !result.before.overflow && result.before.conversationStart > result.before.primary.y
     && result.before.controls.every(control => control.width >= 47.5 && control.height >= 47.5)
     && result.swapped && result.restored && result.choices.expanded === "true" && result.choices.visible
     && result.choices.count === 4 && !result.choices.overflow)

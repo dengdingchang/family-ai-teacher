@@ -49,9 +49,32 @@ function Start-FamilyAiInferenceTunnel {
     $runtimeDir = Join-Path $ProjectRoot 'runtime'
     $null = New-Item -ItemType Directory -Force -Path $runtimeDir
     $started = @()
-    $routes = @(@{ Name = 'avatar'; Port = 8791 })
+    $routes = @(@{ Name = 'avatar'; Port = 8791; TargetPort = 8791 })
+    $publicForwardEnabled = $env:FAMILY_AI_PUBLIC_FORWARD_ENABLED -in @('1', 'true', 'yes', 'on')
+    $publicForwardPort = 8876
+    if ($env:FAMILY_AI_PUBLIC_FORWARD_PORT -match '^\d+$') {
+        $publicForwardPort = [int]$env:FAMILY_AI_PUBLIC_FORWARD_PORT
+    }
+    if ($publicForwardPort -lt 1024 -or $publicForwardPort -gt 65535) {
+        throw "FAMILY_AI_PUBLIC_FORWARD_PORT is outside 1024..65535: $publicForwardPort"
+    }
+    $publicMonitorPort = 8877
+    if ($env:FAMILY_AI_PUBLIC_MONITOR_PORT -match '^\d+$') {
+        $publicMonitorPort = [int]$env:FAMILY_AI_PUBLIC_MONITOR_PORT
+    }
+    if ($publicMonitorPort -lt 1024 -or $publicMonitorPort -gt 65535) {
+        throw "FAMILY_AI_PUBLIC_MONITOR_PORT is outside 1024..65535: $publicMonitorPort"
+    }
+    if ($publicForwardEnabled) {
+        $routes += @{
+            Name = 'public'
+            Port = $publicMonitorPort
+            TargetPort = $publicForwardPort
+            RemotePort = $publicForwardPort
+        }
+    }
     if ($env:TTS_MODE -eq 'remote_preferred') {
-        $routes += @{ Name = 'tts'; Port = 8792 }
+        $routes += @{ Name = 'tts'; Port = 8792; TargetPort = 8792 }
     }
     foreach ($route in $routes) {
         $port = [int]$route.Port
@@ -78,9 +101,14 @@ function Start-FamilyAiInferenceTunnel {
             '-o', 'ServerAliveInterval=20',
             '-o', 'ServerAliveCountMax=3',
             '-o', 'ControlMaster=no',
-            '-L', ("127.0.0.1:{0}:127.0.0.1:{0}" -f $port),
-            $hostAlias
+            '-L', ("127.0.0.1:{0}:127.0.0.1:{1}" -f $port, [int]$route.TargetPort)
         )
+        if ($route.RemotePort) {
+            # Keep the child app loopback-only. The remote end also binds only to
+            # AI Station loopback, where the authenticated public gateway runs.
+            $arguments += @('-R', ("127.0.0.1:{0}:127.0.0.1:{1}" -f [int]$route.RemotePort, $env:APP_PORT))
+        }
+        $arguments += $hostAlias
         $process = Start-Process -FilePath $sshCommand.Source -ArgumentList $arguments `
             -WorkingDirectory $ProjectRoot -WindowStyle Hidden `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru

@@ -17,6 +17,13 @@ $recoveryTunnels = @()
 $nextTunnelRecovery = [datetime]::MinValue
 $requiredTunnelPorts = @(8791)
 if ($env:TTS_MODE -eq 'remote_preferred') { $requiredTunnelPorts += 8792 }
+if ($env:FAMILY_AI_PUBLIC_FORWARD_ENABLED -in @('1', 'true', 'yes', 'on')) {
+    $publicMonitorPort = 8877
+    if ($env:FAMILY_AI_PUBLIC_MONITOR_PORT -match '^\d+$') {
+        $publicMonitorPort = [int]$env:FAMILY_AI_PUBLIC_MONITOR_PORT
+    }
+    $requiredTunnelPorts += $publicMonitorPort
+}
 
 function Write-BackgroundLog([string]$Message) {
     $line = "$(Get-Date -Format o) $Message"
@@ -33,9 +40,13 @@ function Test-FamilyAiHealth {
 }
 
 function Get-FamilyAiLoopbackListener([int]$LocalPort) {
-    return Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction SilentlyContinue |
+    $listener = Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction SilentlyContinue |
         Where-Object { $_.LocalAddress -in @('127.0.0.1', '::1') } |
         Select-Object -First 1
+    if (-not $listener) { return $null }
+    $owner = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+    if (-not $owner -or $owner.ProcessName -ne 'ssh') { return $null }
+    return $listener
 }
 
 try {

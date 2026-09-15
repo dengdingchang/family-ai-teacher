@@ -1,5 +1,5 @@
 async (page) => {
-  const root = "C:/Users/user/.codex/worktrees/13e8/family-ai-teacher";
+  const root = "X:/Workspace/family-ai-teacher";
   const context = await page.context().browser().newContext({ hasTouch:true, viewport:{width:1000,height:850} });
   page = await context.newPage(); const errors = [];
   page.on("pageerror", e => errors.push(e.message));

@@ -118,10 +118,10 @@ test("spoken introduction completion does not reopen listening before the demo t
   assert.equal(f.resumes, 1, "only the component's finished-tail callback permits listening");
 });
 
-test("closing music while microphone permission is pending discards late permission and tracks", async () => {
+test("closing singing while microphone permission is pending discards late permission and tracks", async () => {
   const f = fixture();
   f.c.conversationActive = false; f.c.recordingStream = null; f.c.musicConversationWasActive = false;
-  const opening = f.c.openMusicActivity("piano");
+  const opening = f.c.openMusicActivity("sing");
   await tick();
   assert.equal(f.microphoneCalls, 1, "first music entry starts the shared microphone");
   assert.equal(f.c.musicStudio.opened, true);

@@ -1050,6 +1050,8 @@ h2 {
 .chat-history .live-turn { margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--line); }
 
 @media (max-width: 640px) {
+  .stage-card.call-view .child-video .camera-toolbar { width: auto; }
+  .stage-card.call-view .child-video .camera-tool { flex: 0 0 48px; }
   .stage-heading { display: none; }
   .stage-card .activity-row { grid-template-columns: 1fr; }
   .stage-card .activity-chip { min-height: 52px; padding: 8px 12px; font-size: 15px; }
