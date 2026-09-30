@@ -11,6 +11,7 @@ function fixture(overrides = {}) {
     conversationActive: false, conversationStarting: false, activeRequestController: null,
     segmentRecording: true, segmentShouldSend: true, segmentPcmChunks: [new Float32Array([0.2])],
     activityEnabled: () => true,
+    beginPlayActivity() {},
     async startContinuousConversation() { calls.push("microphone"); context.conversationActive = true; },
     stopVadLoop() { calls.push("pause-listening"); },
     async sendStreamingRequest(request) { calls.push(request); },

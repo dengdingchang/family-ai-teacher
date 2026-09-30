@@ -5,6 +5,8 @@ __pycache__/
 .playwright-cli/
 .mypy_cache/
 .ruff_cache/
+data/*
+!data/.gitkeep
 data/child_profile.json
 data/session_history.jsonl
 data/learning_events.jsonl
@@ -13,6 +15,9 @@ data/skill_graph.json
 data/parent_messages.json
 data/activity_state.json
 data/*.tmp
+data/parent_identity/
+data/public_gateway_auth.json
+data/public_gateway_sessions.json
 runtime/
 output/
 *.log

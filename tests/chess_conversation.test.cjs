@@ -21,6 +21,7 @@ function fixture(overrides = {}) {
     drawingBoard: null, conversationActive: true, conversationStarting: false,
     activeRequestController: null, activeRequestSource: '', activeTurnId: null, interruptedRequestController: null,
     mediaResumePending: false,
+    playActivity: "", beginPlayActivity() {}, endPlayActivity() {}, savePlayEvent: async () => ({}),
     queueGeneration: 0, segmentRecording: true, segmentShouldSend: true, segmentPcmChunks: ['unfinished'],
     speechStartedAt: 0, loudSince: 0, bargeInMonitoring: false, bargeInPcmChunks: [], recordHint: {},
     activityEnabled: name => name === 'game' || name === 'drawing',
@@ -35,7 +36,10 @@ function fixture(overrides = {}) {
     },
     setBusy(busy) { calls.push(['busy', busy]); }, setStatus(message, state) { calls.push(['status', state]); },
     prepareStreamingAudio: async () => true,
-    fetch(url, options) { const wait = deferred(); requests.push({ url, options, wait }); return wait.promise; },
+    fetch(url, options) {
+      if (url === '/api/activities/summary') return Promise.resolve({ ok: true, json: async () => ({ unlocked_chess_level: 'beginner' }) });
+      const wait = deferred(); requests.push({ url, options, wait }); return wait.promise;
+    },
     playAudioPayload(payload, generation) {
       const wait = deferred(); plays.push({ payload, generation, wait, owner: c.activeRequestController }); return wait.promise;
     },

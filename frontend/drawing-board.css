@@ -54,7 +54,7 @@
 .drawing-board__back:hover:not(:disabled) { background: oklch(.33 .07 163); }
 .drawing-board__talk { background: oklch(.95 .026 68); border-color: oklch(.81 .075 68); font-size: 18px; }
 .drawing-board__voice { font-size: 14px; font-weight: 600; color: var(--drawing-green); }
-.drawing-board__stage { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: white; }
+.drawing-board__stage { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: white; touch-action: none; }
 .drawing-board__canvas { display: block; background: white; touch-action: none; user-select: none; cursor: crosshair; flex: none; }
 .drawing-board__footer { flex: none; padding: 12px max(20px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); background: var(--drawing-paper); border-top: 1px solid oklch(.88 .019 107); }
 .drawing-board__tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; }

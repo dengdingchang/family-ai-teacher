@@ -17,13 +17,6 @@ $recoveryTunnels = @()
 $nextTunnelRecovery = [datetime]::MinValue
 $requiredTunnelPorts = @(8791)
 if ($env:TTS_MODE -eq 'remote_preferred') { $requiredTunnelPorts += 8792 }
-if ($env:FAMILY_AI_PUBLIC_FORWARD_ENABLED -in @('1', 'true', 'yes', 'on')) {
-    $publicMonitorPort = 8877
-    if ($env:FAMILY_AI_PUBLIC_MONITOR_PORT -match '^\d+$') {
-        $publicMonitorPort = [int]$env:FAMILY_AI_PUBLIC_MONITOR_PORT
-    }
-    $requiredTunnelPorts += $publicMonitorPort
-}
 
 function Write-BackgroundLog([string]$Message) {
     $line = "$(Get-Date -Format o) $Message"

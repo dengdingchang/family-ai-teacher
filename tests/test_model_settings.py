@@ -253,3 +253,53 @@ def test_malformed_stream_event_is_a_safe_llm_error(model_settings, monkeypatch,
     monkeypatch.setattr("llm.client.httpx.Client", Client)
     with pytest.raises(LLMError):
         list(OpenAICompatibleClient(replace(model_settings, llm_provider="openai")).stream_chat([{"role": "user", "content": "fixture"}]))
+
+
+def test_same_host_night_route_keeps_text_chat_when_day_port_is_down(model_settings, monkeypatch):
+    settings = replace(model_settings, llm_fallback_base_url="http://127.0.0.1:9001/v1",
+                       llm_fallback_model="fixture-lite")
+    seen = []
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def post(self, url, **kwargs):
+            seen.append((url, kwargs["json"]["model"]))
+            if ":9000/" in url:
+                raise httpx.ConnectError("offline", request=httpx.Request("POST", url))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "夜间还能聊"}}]},
+                                  request=httpx.Request("POST", url))
+    monkeypatch.setattr("llm.client.httpx.Client", Client)
+    client = OpenAICompatibleClient(settings)
+    assert client.chat([{"role": "user", "content": "你好"}]).text == "夜间还能聊"
+    assert seen == [("http://127.0.0.1:9000/v1/chat/completions", "fixture-model"),
+                    ("http://127.0.0.1:9001/v1/chat/completions", "fixture-lite")]
+    assert len(client._routes([{"role": "user", "content": "你好"}])) == 2
+    assert client._routes([{"role": "user", "content": [{"type": "image_url"}]}]) == [(settings.llm_base_url, settings.llm_model)]
+    assert OpenAICompatibleClient(replace(settings, llm_base_url="http://other.example:9000/v1"))._routes([]) == [
+        ("http://other.example:9000/v1", settings.llm_model)]
+
+
+def test_night_route_streams_only_after_a_preoutput_failover(model_settings, monkeypatch):
+    settings = replace(model_settings, llm_fallback_base_url="http://127.0.0.1:9001/v1",
+                       llm_fallback_model="fixture-lite")
+    seen = []
+    class Response:
+        def __init__(self, url): self.url = url
+        def __enter__(self):
+            if ":9000/" in self.url:
+                raise httpx.ConnectError("offline", request=httpx.Request("POST", self.url))
+            return self
+        def __exit__(self, *args): pass
+        def raise_for_status(self): pass
+        def iter_lines(self): yield 'data: {"choices":[{"delta":{"content":"夜间回答"}}]}'
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def stream(self, _, url, **kwargs):
+            seen.append((url, kwargs["json"]["model"]))
+            return Response(url)
+    monkeypatch.setattr("llm.client.httpx.Client", Client)
+    assert list(OpenAICompatibleClient(settings).stream_chat([{"role": "user", "content": "你好"}])) == ["夜间回答"]
+    assert [model for _, model in seen] == ["fixture-model", "fixture-lite"]

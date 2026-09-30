@@ -12,6 +12,7 @@ import wave
 from contextlib import contextmanager
 from pathlib import Path
 
+from app.parent_enrollment import ParentEnrollmentStore, validate_embedding
 from audio.metrics import unavailable_gpu_measurement
 from .adapter import TTSAdapterError, TTSResult
 from .persistent import PersistentNathanTTSAdapter, _hidden_process_kwargs
@@ -82,6 +83,10 @@ class StreamingNathanTTSAdapter(PersistentNathanTTSAdapter):
                    "--model", str(self.settings.tts_model),
                    "--ref-audio", str(self.settings.tts_ref_audio),
                    "--language", self.settings.tts_language]
+        data_dir = getattr(self.settings, "data_dir", None)
+        parent_voice = ParentEnrollmentStore(data_dir).voice_path() if data_dir else None
+        if parent_voice is not None:
+            command.extend(["--parent-embedding", str(parent_voice)])
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                    errors="replace", bufsize=1, env=self._environment(),
@@ -104,6 +109,48 @@ class StreamingNathanTTSAdapter(PersistentNathanTTSAdapter):
                 raise TTSAdapterError("Nathan streaming worker has no input")
             process.stdin.write(json.dumps(payload, ensure_ascii=True) + "\n")
             process.stdin.flush()
+
+    def _voice_command(self, command: str, **values) -> dict:
+        with self._slot(None):
+            process = self._ensure_process()
+            self._request_number += 1
+            request_id = str(self._request_number)
+            self._send(process, {"id": request_id, "command": command, **values})
+            try:
+                reply = json.loads(self._readline(process, self.settings.tts_timeout_seconds))
+            except (ValueError, OSError) as exc:
+                raise TTSAdapterError("家长声音处理没有完成") from exc
+            if str(reply.get("id")) != request_id or reply.get("event") == "error":
+                raise TTSAdapterError("家长声音处理没有完成，请重试")
+            return reply
+
+    def prepare_parent_voice(self, wav: bytes) -> tuple[bytes, bytes]:
+        reply = self._voice_command("prepare_voice", audio_base64=base64.b64encode(wav).decode("ascii"))
+        if reply.get("event") != "voice_preview":
+            raise TTSAdapterError("家长声音试听没有完成")
+        try:
+            embedding = base64.b64decode(reply["embedding_base64"], validate=True)
+            audio = base64.b64decode(reply["audio_base64"], validate=True)
+            validate_embedding(embedding)
+            self._validate_wav(audio, float(reply["duration_s"]))
+        except (KeyError, ValueError, TypeError) as exc:
+            raise TTSAdapterError("家长声音试听格式无效") from exc
+        return embedding, audio
+
+    def activate_parent_voice(self, embedding: bytes) -> None:
+        validate_embedding(embedding)
+        reply = self._voice_command("activate_voice", embedding_base64=base64.b64encode(embedding).decode("ascii"))
+        if reply.get("event") != "voice_active":
+            raise TTSAdapterError("家长声音没有启用")
+        with self._cache_lock:
+            self._audio_cache.clear()
+
+    def restore_nathan_voice(self) -> None:
+        reply = self._voice_command("restore_voice")
+        if reply.get("event") != "voice_active":
+            raise TTSAdapterError("原有声音没有恢复")
+        with self._cache_lock:
+            self._audio_cache.clear()
 
     @staticmethod
     def _check_cancelled(cancel_event) -> None:

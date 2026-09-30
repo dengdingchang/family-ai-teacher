@@ -7,6 +7,7 @@
     <title>家长成长空间 · Family AI Teacher</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="stylesheet" href="/parent.css?v=20260906-questions" />
+    <link rel="stylesheet" href="/parent-visual-refresh.css?v=20260927-play-progress" />
   </head>
   <body>
     <a class="skip-link" href="#today">跳到今日成长</a>
@@ -36,12 +37,20 @@
       </header>
 
       <nav class="parent-nav" aria-label="成长空间导航">
-        <a href="#today">今天</a><a href="#learning">学习进度</a
+        <a href="/setup">家长形象</a><a href="#today">今天</a><a href="#learning">学习进度</a
         ><a href="#memories">家庭记忆</a><a href="#familySettings">家庭设置</a>
       </nav>
       <p id="dashboardStatus" class="dashboard-status" role="status">
         正在整理家庭的成长记录…
       </p>
+      <section class="identity-invite" aria-labelledby="identityInviteTitle">
+        <div>
+          <p class="eyebrow">让熟悉的陪伴来到孩子面前</p>
+          <h2 id="identityInviteTitle">用自己的声音和形象，陪孩子一起学。</h2>
+          <p>跟着引导现场录一段短视频。系统先检查画面和声音，再请你试听确认；录制原片不会保存。</p>
+        </div>
+        <a class="primary-button" href="/setup">开始家长录制 ↗</a>
+      </section>
       <section class="overview-grid" aria-label="今日概览">
         <article class="metric-card coral">
           <span>今天的交流</span>
@@ -84,6 +93,15 @@
             <div id="todayTimeline" class="timeline empty-state">
               今天还没有新的学习记录。
             </div>
+          </article>
+
+          <article class="panel play-progress" aria-labelledby="playProgressTitle">
+            <div class="panel-heading"><div><p class="eyebrow">一起玩的每一步</p><h2 id="playProgressTitle">活动与礼物</h2></div></div>
+            <p class="panel-note">这里记录已保存的活动用时、最近一步和下棋胜负；小考验只记录尝试，不代表已经掌握。</p>
+            <div id="playActivitySummary" class="play-activity-summary">还没有活动记录。</div>
+            <h3>等爸爸下班的神秘礼物</h3>
+            <div id="playRewards" class="play-rewards">还没有待兑换的礼物。</div>
+            <p id="playRewardStatus" class="save-status" role="status"></p>
           </article>
 
           <article class="panel journal-panel">
@@ -437,7 +455,7 @@
       </p>
     </main>
     <script src="/daily-guidance.js?v=20260909-server-date" defer></script>
-    <script src="/parent.js?v=20260909-server-date" defer></script>
+    <script src="/parent.js?v=20260927-play-progress" defer></script>
     <script src="/parent-models.js?v=20260910-1" defer></script>
   </body>
 </html>

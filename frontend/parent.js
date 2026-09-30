@@ -139,6 +139,41 @@ function formatInteractionTime(seconds, available) {
   return `${minutes}分${wholeSeconds % 60}秒`;
 }
 
+function renderPlaySummary(summary = {}) {
+  const labels = { chess: "下棋", drawing: "画画", piano: "钢琴", singing: "唱歌", story: "故事", game: "互动游戏" };
+  const levels = { beginner: "初级", intermediate: "中级", advanced: "高级" };
+  const results = { win: "赢了", loss: "输了", draw: "平局" };
+  const root = byId("playActivitySummary"), rewardsRoot = byId("playRewards");
+  root.replaceChildren(); rewardsRoot.replaceChildren();
+  const entries = Object.entries(summary.activities || {}).filter(([name]) => labels[name]);
+  if (!entries.length) root.textContent = "还没有活动记录。";
+  for (const [name, item] of entries) {
+    const card = document.createElement("article"); card.className = "play-activity-card";
+    const title = document.createElement("strong"); title.textContent = labels[name];
+    const detail = document.createElement("span");
+    detail.textContent = `${formatInteractionTime(Number(item.seconds || 0), true)} · ${Number(item.sessions || 0)}次${item.step ? ` · 最近：${item.step}` : ""}${item.last_result ? ` · 挑战${results[item.last_result] || "已结束"}` : ""}`;
+    card.append(title, detail); root.append(card);
+  }
+  const pending = (summary.rewards || []).filter(item => item.status === "pending");
+  if (!pending.length) rewardsRoot.textContent = "还没有待兑换的礼物。";
+  for (const reward of pending) {
+    const row = document.createElement("div"); row.className = "play-reward-card";
+    const textNode = document.createElement("span");
+    textNode.textContent = `🎁 ${levels[reward.level] || "下棋"}挑战礼物 · ${formatTime(reward.created_at)} · 待爸爸兑换`;
+    const button = document.createElement("button"); button.type = "button";
+    button.className = "quiet-button"; button.textContent = "爸爸确认已兑换";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await api(`/api/parent/rewards/${encodeURIComponent(reward.id)}/redeem`, { method: "POST", headers: { "X-Family-Parent-Action": "redeem" } });
+        showStatus("playRewardStatus", "这份礼物已标记为兑换。请按家庭约定把礼物交给孩子。");
+        await loadDashboard();
+      } catch (error) { showStatus("playRewardStatus", `暂时没能兑换：${error.message}`, true); button.disabled = false; }
+    });
+    row.append(textNode, button); rewardsRoot.append(row);
+  }
+}
+
 function appendQuestionQuotes(root, values, title) {
   const questions = (Array.isArray(values) ? values : [])
     .filter(value => typeof value === "string" && value.trim());
@@ -668,6 +703,7 @@ async function loadDashboard() {
       : "看见今天的小进步，也把爸爸的话带回家。";
     if (!profileDirty) renderProfile(data.profile || {}, data.brain || {});
     renderToday(data.today || {});
+    renderPlaySummary(data.play_summary || {});
     renderSkills(data.skill_graph || { skills: [] });
     renderJournal(data.growth_journal || []);
     if (data.current_activity?.status === "active") {

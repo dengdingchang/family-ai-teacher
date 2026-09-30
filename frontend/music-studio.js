@@ -113,12 +113,12 @@ export class MusicStudio {
    * onListeningChange(allowed) gates the host's ordinary speech recognition.
    */
   constructor({ onSpeak = () => ({ ok: true }), acquireMicrophone = async () => null,
-    transcribe = async () => "", onClose = () => {}, onListeningChange = () => {}, onThemeRequest = null, document: doc = globalThis.document,
+    transcribe = async () => "", onClose = () => {}, onListeningChange = () => {}, onProgress = () => {}, onThemeRequest = null, document: doc = globalThis.document,
     audioContextFactory, MediaRecorder: Recorder = globalThis.MediaRecorder, storage,
     later, cancelLater, now = () => globalThis.performance?.now?.() || Date.now(), recordingMs = 4500 } = {}) {
     if (!doc?.body) throw new Error("Music studio needs a document body");
     this.doc = doc; this.win = doc.defaultView || globalThis;
-    this.onSpeak = onSpeak; this.acquireMicrophone = acquireMicrophone; this.transcribe = transcribe; this.onClose = onClose;
+    this.onSpeak = onSpeak; this.acquireMicrophone = acquireMicrophone; this.transcribe = transcribe; this.onClose = onClose; this.onProgress = onProgress;
     this.onListeningChange = onListeningChange; this.listeningAllowed = null;
     this.onThemeRequest = onThemeRequest; this.themeGeneration = 0; this.themeArtwork = new Map();
     this.audioContextFactory = audioContextFactory || (() => new (this.win.AudioContext || this.win.webkitAudioContext)());
@@ -187,7 +187,12 @@ export class MusicStudio {
   open() { if (this.destroyed || this.opened) return this; this.opened = true; this.focusBefore = this.doc.activeElement; this.overflowBefore = this.doc.body.style.overflow; this.doc.body.style.overflow = "hidden"; this.element.hidden = false; this._render(); this.back.focus({ preventScroll: true }); this._setListeningAllowed(true); return this; }
   close() { if (!this.opened) return; this.opened = false; this.generation++; this.themeGeneration++; this._themeStatus(""); this._clearDemo(); this._cancelRecording(); this._setListeningAllowed(false); this.element.hidden = true; this.doc.body.style.overflow = this.overflowBefore; try { this.onClose(); } finally { if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true }); } }
   destroy() { this.close(); this.destroyed = true; this.doc.removeEventListener("keydown", this._keydown, true); this.doc.removeEventListener("visibilitychange", this._visibility); this.context?.close?.(); this.element.remove(); }
-  setMode(mode) { if (!this.opened || !["piano", "sing", "rhythm"].includes(mode)) return; this.generation++; this._clearDemo(); this._cancelRecording(); this.mode = mode; this.performance = []; this.journey.resetAttempt(); this.feedback.textContent = ""; this._syncReference(); this._render(); this._setListeningAllowed(true); }
+  _reportProgress(completed = false) {
+    const step = this.mode === "sing" ? `跟唱第 ${this.demoGroup + 1} 组` : `第 ${this.journey.index + 1} 关 · ${this.journey.lesson.title}${completed ? " · 完成" : ""}`;
+    try { this.onProgress({ activity: this.mode === "sing" ? "singing" : "piano", kind: "stage", step }); }
+    catch (_) { /* Tracking must not interrupt music. */ }
+  }
+  setMode(mode) { if (!this.opened || !["piano", "sing", "rhythm"].includes(mode)) return; this.generation++; this._clearDemo(); this._cancelRecording(); this.mode = mode; this.performance = []; this.journey.resetAttempt(); this.feedback.textContent = ""; this._syncReference(); this._render(); this._setListeningAllowed(true); this._reportProgress(); }
   _setListeningAllowed(allowed) {
     const next = Boolean(allowed && this.opened && !this.destroyed && !this.doc.hidden);
     if (this.listeningAllowed === next) return;
@@ -220,7 +225,7 @@ export class MusicStudio {
     if (this.mode === "sing") this.demoGroup = (this.demoGroup + 1) % DEMO_GROUPS.length;
     else if (!this.journey.next()) { this.journey.resetAttempt(); }
     if (this.mode !== "sing") this._saveProgress();
-    this.performance = []; this.feedback.textContent = ""; this._syncReference(); this._render(); void this.demo(); return true;
+    this.performance = []; this.feedback.textContent = ""; this._syncReference(); this._render(); this._reportProgress(); void this.demo(); return true;
   }
   _saveProgress() {
     try { this.practiceStorage?.setItem(MUSIC_PROGRESS_KEY, JSON.stringify(this.journey.snapshot())); }
@@ -230,7 +235,7 @@ export class MusicStudio {
     if (!this.opened) return false;
     this.generation++; this._clearDemo(); this._cancelRecording(); this.journey.resetProgress(); this.performance = [];
     if (this.mode === "sing") this.mode = "piano";
-    this._saveProgress(); this.feedback.textContent = "从第一关慢慢练，爸爸陪你。"; this._syncReference(); this._render(); void this.demo(); return true;
+    this._saveProgress(); this.feedback.textContent = "从第一关慢慢练，爸爸陪你。"; this._syncReference(); this._render(); this._reportProgress(); void this.demo(); return true;
   }
   changeTheme(id) {
     if (!this.opened) return;
@@ -375,6 +380,7 @@ export class MusicStudio {
       } else if (result.kind === "progress") this.feedback.textContent = `接上了！再找${NOTES.find(item => item.id === this.reference[result.index]).label}。`;
       else if (result.kind === "complete") {
         this._saveProgress();
+        this._reportProgress(true);
         const amount = this.reference.length === 3 ? "三个音" : `${this.reference.length}个音`;
         const rhythm = result.rhythmEven && !result.mistakes ? `节奏：${amount}很整齐。` : "你把这一小段弹完整了，下次可以再试试均匀的节拍。";
         const praise = `顺序：对啦，${amount}走对了。${rhythm}${this.journey.isLast ? "已经弹出欢乐颂的一段啦，可以换接音符再玩一次。" : "准备好就说下一关，爸爸陪你继续。"}`;
@@ -470,7 +476,7 @@ export class MusicStudio {
     else if (result.kind === "early") this.feedback.textContent = "找对朋友啦，再等它落到下面。";
     else if (result.kind === "hit") this.feedback.textContent = result.assisted ? "接到了，我们慢慢接下一个。" : "正好接上这一个！";
     else if (result.kind === "complete") {
-      const summary = round.summary(); this.journey.markComplete(); this._saveProgress();
+      const summary = round.summary(); this.journey.markComplete(); this._saveProgress(); this._reportProgress(true);
       const praise = `你接住了全部${summary.total}个小伙伴！${summary.onTime ? `其中${summary.onTime}个跟上了节拍。` : "你找到了每一个朋友对应的琴键。"}${this.journey.isLast ? "已经能接完整段欢乐颂啦，再选一种主题玩玩吧。" : "准备好就说下一关，爸爸陪你继续。"}`;
       this.feedback.textContent = praise; this._stopRhythm(); this._render(); this._queuePraise(praise);
     }

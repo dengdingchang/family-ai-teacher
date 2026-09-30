@@ -1,0 +1,65 @@
+/* The parent view uses the same warm family-room palette as the child view. */
+:root {
+  --ink: #20342f;
+  --muted: #64736d;
+  --line: #e5e0d7;
+  --paper: #fffdf9;
+  --page: #f6f3ed;
+  --accent: #225b49;
+  --accent-soft: #e7f1eb;
+}
+body { background: var(--page); }
+.parent-shell { width: min(1180px, calc(100% - 48px)); padding-top: 18px; }
+.parent-masthead { margin-bottom: 14px; padding-bottom: 10px; }
+.family-wordmark { font-size: 20px; letter-spacing: -.04em; }
+.parent-header { gap: 14px; margin-bottom: 13px; padding: 18px 22px; border: 1px solid #e8e2d8; border-radius: 20px; background: #fffdf9; }
+.parent-header h1 { max-width: 620px; margin-bottom: 5px; font-size: clamp(29px, 3vw, 38px); line-height: 1.14; letter-spacing: -.045em; }
+.parent-header .eyebrow { margin-bottom: 4px; }
+.parent-header .subtitle { font-size: 14px; line-height: 1.5; }
+.header-actions { gap: 10px; }
+.header-actions a { border-radius: 999px; min-height: 48px; }
+.parent-nav { gap: 8px; border-bottom: 0; padding: 4px; margin-bottom: 10px; border-radius: 999px; background: #eaece5; width: fit-content; max-width: 100%; }
+.parent-nav a { min-height: 42px; display: inline-flex; align-items: center; padding: 0 16px; border: 0; border-radius: 999px; font-weight: 650; }
+.parent-nav a:hover, .parent-nav a:focus-visible { background: #fffdf9; text-decoration: none; }
+.overview-grid { gap: 10px; padding: 0; margin-bottom: 8px; }
+.identity-invite { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 20px; margin: 0 0 12px; border-radius: 18px; background: #1f5141; color: #fffaf1; }
+.identity-invite .eyebrow { color: #bad8c4; }
+.identity-invite h2 { max-width: 620px; margin: 0 0 4px; font-size: clamp(19px, 2vw, 24px); letter-spacing: -.035em; }
+.identity-invite p:last-child { max-width: 650px; margin: 0; color: #d5e5d7; font-size: 13px; line-height: 1.45; }
+.identity-invite .primary-button { flex-shrink: 0; min-height: 50px; padding-inline: 20px; color: #1f5141; background: #fffaf1; text-decoration: none; }
+.identity-invite .primary-button:hover { background: #e6f0e5; }
+.metric-card { padding: 12px 15px; border: 1px solid #e9e4da; border-radius: 15px; background: #fffdf9; }
+.metric-card strong { font-size: clamp(21px, 2.5vw, 28px); }
+.interaction-timing-note { margin: 0 0 13px; }
+.dashboard-grid { gap: 15px; }
+.main-column, .side-column { gap: 15px; }
+.panel { border: 1px solid #e9e4da; border-radius: 18px; background: #fffdf9; }
+.panel h2 { letter-spacing: -.035em; }
+.primary-button { border-radius: 999px; }
+.quiet-button { border-radius: 999px; }
+.soft-pill { border-radius: 999px; }
+.privacy-footer { margin-top: 24px; }
+@media (max-width: 760px) {
+  .identity-invite { align-items: flex-start; flex-direction: column; gap: 11px; padding: 17px; }
+  .identity-invite .primary-button { width: 100%; justify-content: center; }
+  .parent-shell { width: calc(100% - 28px); padding-top: 12px; }
+  .parent-masthead { margin-bottom: 12px; padding-bottom: 9px; }
+  .parent-header { padding: 17px; }
+  .parent-nav { width: 100%; border-radius: 17px; }
+  .parent-nav a { white-space: nowrap; padding-inline: 13px; }
+  .metric-card { padding: 11px 12px; }
+}
+@media (max-width: 450px) {
+  .parent-header h1 { font-size: 29px; }
+  .parent-nav { justify-content: flex-start; }
+  .parent-nav a { font-size: 12px; }
+  .metric-card strong { font-size: 21px; }
+  .metric-card.coral strong { font-size: 17px; }
+}
+.play-progress { margin: 18px 0 24px; }
+.play-progress h3 { margin: 20px 0 12px; font-size: 1.05rem; }
+.play-activity-summary, .play-rewards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.play-activity-card, .play-reward-card { display: flex; flex-direction: column; gap: 7px; padding: 15px 17px; border: 1px solid #e3dfd0; border-radius: 17px; background: #fffdf7; }
+.play-activity-card strong { color: #205844; font-size: 1.08rem; }
+.play-activity-card span, .play-reward-card span { line-height: 1.5; color: #53635b; }
+.play-reward-card .quiet-button { align-self: flex-start; min-height: 44px; }

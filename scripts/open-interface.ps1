@@ -3,9 +3,11 @@ $port = 8760
 if ($env:APP_PORT -match '^\d+$') { $port = [int]$env:APP_PORT }
 $url = "http://127.0.0.1:$port/"
 
-# The background service can need time to warm after sign-in. Never open an
-# error page first; wait for the exact local application identity.
-$deadline = (Get-Date).AddMinutes(3)
+# The background service can need several minutes to recover its local GPU
+# runtimes after sign-in. Never open an error page first; wait for the exact
+# local application identity. The previous three-minute window was observed to
+# expire during a real recovery even though the service later became healthy.
+$deadline = (Get-Date).AddMinutes(15)
 $ready = $false
 while ((Get-Date) -lt $deadline) {
     try {

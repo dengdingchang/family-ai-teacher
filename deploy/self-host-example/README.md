@@ -1,10 +1,16 @@
 # AI Station deployment and OOM guardrail
 
+## 2026-09-26 parent avatar and public route
+
+AI Station no longer serves the `teacher.example.com` public route. Its shared Cloudflare ingress has no teacher entry; the former `family-ai-teacher-gateway.service` and its drop-in are archived under their dated `.archived-20260926` names. Windows owns the dedicated public Cloudflare Tunnel and loopback login gateway described in the project README. Do not restart the archived gateway or add a second teacher ingress here.
+
+`services/parent_avatar.py` is the existing SoulX portrait switch helper. Windows invokes it over the private SSH alias `ai` only after a parent confirms the on-device recording. `activate` reads a bounded, processed JPEG from stdin, validates it, stores the parent portrait, and places a systemd drop-in for the existing SoulX unit. `restore` removes the portrait and drop-in and returns SoulX to the original Nathan reference. These operations do not install a model or move child records to AI Station. A config change is not proof that SoulX produced correct moving video: check a real speaking turn while the service is active.
+
 These units describe the optional loopback-only inference services. As of 2026-09-05, X17 uses remote-preferred Nathan TTS with the existing local model as fallback. Both services are enabled; TTS is ordered after SoulX and vLLM. Startup ordering is not a health/readiness guarantee; each model still runs its own health and free-VRAM checks.
 
 ## Fixed limits
 
-- vLLM: `GPU_MEMORY_UTILIZATION=0.72` (configured by its existing systemd drop-in).
+- vLLM: `GPU_MEMORY_UTILIZATION=0.70`, `MAX_NUM_SEQS=8` (configured by its existing systemd drop-in).
 - Nathan TTS: `TTS_GPU_MEMORY_FRACTION=0.06`, `TTS_MIN_FREE_MIB=17000`.
 - SoulX: `SOULX_GPU_MEMORY_FRACTION=0.07`, `SOULX_MIN_FREE_MIB=17000`, `SOULX_IDLE_MODE=speech_only`, `SOULX_H264_BATCH_FRAMES=3`.
 - Operational stop line: do not continue if final free VRAM is below 12GiB or vLLM health is not HTTP 200.

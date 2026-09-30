@@ -114,6 +114,10 @@
     const board = element("section", "drawing-board");
     board.hidden = true; board.setAttribute("role", "dialog");
     board.setAttribute("aria-modal", "true"); board.setAttribute("aria-label", "我的画板");
+    // Keep a finger drag inside the drawing overlay instead of scrolling the page.
+    board.addEventListener("touchmove", event => {
+      if (opened && event.cancelable) event.preventDefault();
+    }, { passive: false });
     const header = element("header", "drawing-board__header");
     const back = button("← 返回", () => close(), "drawing-board__back");
     const heading = element("div", "drawing-board__heading");
@@ -352,7 +356,11 @@
       doc.body.style.overflow = "hidden"; board.hidden = false;
       observation.setEnabled(true); observation.setVisible(!doc.hidden); observation.setActive(true);
       refreshObservation(); refreshTools(); resize(); back.focus({ preventScroll: true });
-      if (nativeFullscreen && board.requestFullscreen && !doc.fullscreenElement) {
+      // A touch device already has a full-viewport overlay. Native fullscreen
+      // can be dismissed by a downward system gesture, which must not end art.
+      const touchDevice = Number(win.navigator?.maxTouchPoints || 0) > 0
+        || Boolean(win.matchMedia?.("(pointer: coarse)")?.matches);
+      if (nativeFullscreen && !touchDevice && board.requestFullscreen && !doc.fullscreenElement) {
         try {
           Promise.resolve(board.requestFullscreen()).then(() => {
             ownsFullscreen = doc.fullscreenElement === board;
@@ -389,7 +397,9 @@
       finishStroke(); observation.setVisible(!doc.hidden); feedback.textContent = ""; refreshObservation();
     };
     const fullscreen = () => {
-      if (ownsFullscreen && doc.fullscreenElement !== board) close();
+      // Esc or a browser gesture may end native fullscreen. The fixed overlay
+      // remains the drawing surface until the child presses Return.
+      if (ownsFullscreen && doc.fullscreenElement !== board) ownsFullscreen = false;
       resize();
     };
     doc.addEventListener("keydown", keydown, true);

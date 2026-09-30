@@ -7,6 +7,7 @@ import time
 import base64
 from dataclasses import dataclass
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -30,6 +31,7 @@ class LLMResult:
 class OpenAICompatibleClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._fallback_until = 0.0
 
     @property
     def configured(self) -> bool:
@@ -47,12 +49,24 @@ class OpenAICompatibleClient:
             headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
         return headers
 
-    def _url(self, suffix: str) -> str:
-        return f"{self.settings.llm_base_url}/{suffix.lstrip('/')}"
+    def _url(self, suffix: str, base_url: str | None = None) -> str:
+        return f"{base_url or self.settings.llm_base_url}/{suffix.lstrip('/')}"
 
-    def _request_payload(self, messages: list[dict[str, Any]], max_tokens: int, stream: bool) -> tuple[str, dict]:
+    def _routes(self, messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        primary = (self.settings.llm_base_url, self.settings.llm_model)
+        fallback = (self.settings.llm_fallback_base_url, self.settings.llm_fallback_model)
+        first = urlsplit(primary[0]); second = urlsplit(fallback[0])
+        has_image = any(isinstance(message.get("content"), list) for message in messages)
+        if (getattr(self.settings, "llm_provider", "compatible") != "compatible" or has_image
+                or not fallback[0] or not fallback[1] or first.scheme != second.scheme
+                or not first.hostname or first.hostname != second.hostname):
+            return [primary]
+        return [fallback, primary] if time.monotonic() < self._fallback_until else [primary, fallback]
+
+    def _request_payload(self, messages: list[dict[str, Any]], max_tokens: int, stream: bool,
+                         model: str | None = None) -> tuple[str, dict]:
         if getattr(self.settings, "llm_provider", "compatible") != "openai":
-            return "/chat/completions", {"model": self.settings.llm_model, "messages": messages,
+            return "/chat/completions", {"model": model or self.settings.llm_model, "messages": messages,
                 "temperature": 0.45, "max_tokens": max_tokens, "stream": stream}
         converted = []
         for message in messages:
@@ -97,20 +111,31 @@ class OpenAICompatibleClient:
         timeout_seconds: float | None = None,
     ) -> LLMResult:
         self._require_configured()
-        endpoint, payload = self._request_payload(messages, max_tokens, False)
         started = time.perf_counter()
-        try:
-            with httpx.Client(
-                timeout=timeout_seconds or self.settings.llm_timeout_seconds,
-                trust_env=False,
-            ) as client:
-                response = client.post(self._url(endpoint), headers=self._headers(), json=payload)
-                response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPStatusError as exc:
-            raise LLMError(f"AI Station returned HTTP {exc.response.status_code}") from exc
-        except (httpx.HTTPError, json.JSONDecodeError) as exc:
-            raise LLMError("AI Station request failed") from exc
+        routes = self._routes(messages)
+        for index, (base_url, model) in enumerate(routes):
+            endpoint, payload = self._request_payload(messages, max_tokens, False, model)
+            try:
+                with httpx.Client(timeout=timeout_seconds or self.settings.llm_timeout_seconds,
+                                  trust_env=False) as client:
+                    response = client.post(self._url(endpoint, base_url), headers=self._headers(), json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                if index == 1 and base_url == self.settings.llm_fallback_base_url:
+                    self._fallback_until = time.monotonic() + 30
+                elif base_url == self.settings.llm_base_url:
+                    self._fallback_until = 0.0
+                break
+            except httpx.HTTPStatusError as exc:
+                if index + 1 < len(routes) and exc.response.status_code in {502, 503, 504}:
+                    continue
+                raise LLMError(f"AI Station returned HTTP {exc.response.status_code}") from exc
+            except httpx.RequestError as exc:
+                if index + 1 < len(routes):
+                    continue
+                raise LLMError("AI Station request failed") from exc
+            except json.JSONDecodeError as exc:
+                raise LLMError("AI Station request failed") from exc
         try:
             if not isinstance(data, dict) or data.get("status") in {"failed", "incomplete"}:
                 raise LLMError("Model returned an invalid or incomplete response")
@@ -125,47 +150,54 @@ class OpenAICompatibleClient:
         """Yield OpenAI-compatible SSE deltas for diagnostics and future UI streaming."""
 
         self._require_configured()
-        endpoint, payload = self._request_payload(messages, max_tokens, True)
-        try:
-            with httpx.Client(
-                timeout=self.settings.llm_timeout_seconds,
-                trust_env=False,
-            ) as client:
-                with client.stream(
-                    "POST",
-                    self._url(endpoint),
-                    headers=self._headers(),
-                    json=payload,
-                ) as response:
-                    response.raise_for_status()
-                    for line in response.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        raw = line[5:].strip()
-                        if raw == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
-                        if data.get("type") == "response.output_text.delta":
-                            yield str(data.get("delta") or "")
-                            continue
-                        if data.get("type") in {"error", "response.failed", "response.incomplete"}:
-                            raise LLMError("Model streaming response failed")
-                        choices = data.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        content = delta.get("content") or ""
-                        if content:
-                            yield str(content)
-        except httpx.HTTPStatusError as exc:
-            raise LLMError(f"AI Station returned HTTP {exc.response.status_code}") from exc
-        except httpx.HTTPError as exc:
-            raise LLMError("AI Station streaming request failed") from exc
-        except (AttributeError, TypeError, IndexError, KeyError):
-            raise LLMError("Model returned an invalid streaming response format") from None
+        routes = self._routes(messages)
+        for index, (base_url, model) in enumerate(routes):
+            endpoint, payload = self._request_payload(messages, max_tokens, True, model)
+            emitted = False
+            try:
+                with httpx.Client(timeout=self.settings.llm_timeout_seconds, trust_env=False) as client:
+                    with client.stream("POST", self._url(endpoint, base_url),
+                                       headers=self._headers(), json=payload) as response:
+                        response.raise_for_status()
+                        if index == 1 and base_url == self.settings.llm_fallback_base_url:
+                            self._fallback_until = time.monotonic() + 30
+                        elif base_url == self.settings.llm_base_url:
+                            self._fallback_until = 0.0
+                        for line in response.iter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            raw = line[5:].strip()
+                            if raw == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(raw)
+                            except json.JSONDecodeError:
+                                continue
+                            if data.get("type") == "response.output_text.delta":
+                                emitted = True
+                                yield str(data.get("delta") or "")
+                                continue
+                            if data.get("type") in {"error", "response.failed", "response.incomplete"}:
+                                raise LLMError("Model streaming response failed")
+                            choices = data.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content") or ""
+                            if content:
+                                emitted = True
+                                yield str(content)
+                return
+            except httpx.HTTPStatusError as exc:
+                if not emitted and index + 1 < len(routes) and exc.response.status_code in {502, 503, 504}:
+                    continue
+                raise LLMError(f"AI Station returned HTTP {exc.response.status_code}") from exc
+            except httpx.RequestError as exc:
+                if not emitted and index + 1 < len(routes):
+                    continue
+                raise LLMError("AI Station streaming request failed") from exc
+            except (AttributeError, TypeError, IndexError, KeyError):
+                raise LLMError("Model returned an invalid streaming response format") from None
 
     def describe_image(
         self,

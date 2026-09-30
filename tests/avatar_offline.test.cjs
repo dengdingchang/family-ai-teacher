@@ -37,6 +37,7 @@ test('renderer error releases frame wait immediately and reconnects via close cl
     close() { this.readyState = 3; handlers.close(); }
   }
   const c = vm.createContext({avatarSocket: null, WebSocket: Socket, Blob,
+    customParentActive: false, customAvatarConfigured: false,
     avatarReady: false, avatarAcceptFrames: true, avatarFrameGeneration: 0,
     avatarEncodedQueue: [1], avatarNeedsKeyframe: false, avatarPumpTimer: null,
     avatarDecoder: {state:'configured', reset(){ reset++; }},

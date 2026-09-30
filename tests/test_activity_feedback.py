@@ -161,6 +161,18 @@ def test_themed_english_answer_continues_same_activity(activity_store):
     assert transition["activity"] == "english" and transition["topic"] == "恐龙" and transition["step"] == 2
 
 
+@pytest.mark.parametrize("reply_text", ["Rat", "R.A.D.", "已经说了呀", "我刚才说过了"])
+def test_english_pronunciation_attempt_moves_on_without_claiming_mastery(activity_store, reply_text):
+    activity_store.apply_activity_transition({"action": "set", "activity": "english", "step": 2})
+    reply, transition = main._activity_turn_reply(reply_text, PROFILE)
+    assert transition["action"] == "set" and transition["step"] == 5
+    assert "不重复跟读" in reply and "Blue" in reply
+    assert "说对" not in reply and "掌握" not in reply
+    activity_store.apply_activity_transition(transition)
+    reply, transition = main._activity_turn_reply("Blue", PROFILE)
+    assert transition["action"] == "clear" and "蓝色" in reply
+
+
 def test_themed_counting_stays_in_theme_but_does_not_claim_mastery(activity_store):
     _, transition = main._activity_turn_reply("我想玩恐龙数数游戏", PROFILE)
     activity_store.apply_activity_transition(transition)

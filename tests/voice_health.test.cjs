@@ -15,7 +15,8 @@ for (const state of ['failed', 'retry_wait', 'retrying', 'ready', 'warming']) {
         fetch: async () => ({ok: true, json: async () => ({
           llm_configured: true, stt_ready: true, tts_ready: true, tts_warmup: state,
         })}),
-        serviceBadge: {textContent: '', classList: {toggle: (k,v) => classes.set(k,v)}},
+        serviceBadge: {textContent: '', classList: {toggle: (k,v) => classes.set(k,v), add: k => classes.set(k,true), remove: k => classes.set(k,false)}},
+        customParentActive: false, customAvatarConfigured: false,
         conversationActive: active === true, conversationStarting: false,
         activeRequestController: active === 'typed' ? {} : null,
         setBusy: v => busy.push(v), setStatus: (...args) => statuses.push(args), setAvatarIdleAvailable() {},
@@ -39,7 +40,8 @@ test('unconfigured remote brain still clearly offers the available local voice a
     fetch: async () => ({ok: true, json: async () => ({
       llm_configured: false, stt_ready: true, tts_ready: true, tts_warmup: 'ready',
     })}),
-    serviceBadge: {textContent: '', classList: {toggle(){}}},
+    serviceBadge: {textContent: '', classList: {toggle(){}, add(){}, remove(){}}},
+    customParentActive: false, customAvatarConfigured: false,
     conversationActive: false, conversationStarting: false, activeRequestController: null,
     setBusy(){}, setStatus: text => statuses.push(text), setAvatarIdleAvailable(){}, setTimeout(){},
   });

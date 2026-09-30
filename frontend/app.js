@@ -1,12 +1,56 @@
 import "/pcm-player.js?v=20260907-playback-clock";
 import "/voice-activity.js?v=20260906-2";
 import "/interaction-clock.js?v=20260906-1";
-import "/drawing-board.js?v=20260910-1";
-import { CallView } from "/call-view.js?v=20260910-1";
+import "/drawing-board.js?v=20260927-touch-paint";
+import { CallView } from "/call-view.js?v=20260927-immersive";
 import { AvatarCompanion } from "/avatar-companion.js?v=20260910-playtime";
-import { MusicStudio, parseMusicVoiceCommand } from "/music-studio.js?v=20260910-playtime";
+import { MusicStudio, parseMusicVoiceCommand } from "/music-studio.js?v=20260927-play-progress";
 import { MediaViewer } from "/media-viewer.js?v=20260910-replay";
 import { chooseMediaSuggestion } from "/media-intent.js?v=20260910-open";
+
+let playActivity = "", playStartedAt = 0, playStep = "";
+const pendingPlayEvents = new Map();
+function postPlayEvent(event) {
+  return fetch("/api/activities/event", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event), keepalive: true }).then(async response => {
+    if (!response.ok) throw new Error("activity receipt failed");
+    pendingPlayEvents.delete(event.event_id);
+    return response.json();
+  });
+}
+function savePlayEvent(payload) {
+  const event = { event_id: crypto.randomUUID(), activity: playActivity || payload.activity,
+    kind: payload.kind, step: String(payload.step || playStep).slice(0, 80),
+    duration_seconds: Math.max(0, Math.min(3600, Math.round(payload.duration_seconds || 0))),
+    level: payload.level || "", result: payload.result || "", independent: Boolean(payload.independent) };
+  pendingPlayEvents.set(event.event_id, event);
+  return postPlayEvent(event);
+}
+function endPlayActivity() {
+  if (!playActivity) return;
+  if (playStartedAt) void savePlayEvent({ kind: "session", duration_seconds: (performance.now() - playStartedAt) / 1000 }).catch(() => {});
+  playActivity = ""; playStartedAt = 0; playStep = "";
+}
+function beginPlayActivity(name, step = "") {
+  if (playActivity !== name) endPlayActivity();
+  playActivity = name; playStep = step;
+  if (!playStartedAt && !document.hidden) playStartedAt = performance.now();
+}
+document.addEventListener("visibilitychange", () => {
+  if (!playActivity) return;
+  if (document.hidden && playStartedAt) {
+    void savePlayEvent({ kind: "session", duration_seconds: (performance.now() - playStartedAt) / 1000 }).catch(() => {});
+    playStartedAt = 0;
+  } else if (!document.hidden) playStartedAt = performance.now();
+});
+window.setInterval(() => {
+  for (const event of pendingPlayEvents.values()) void postPlayEvent(event).catch(() => {});
+  if (!playActivity || !playStartedAt || document.hidden) return;
+  const elapsed = (performance.now() - playStartedAt) / 1000;
+  if (elapsed < 30) return;
+  void savePlayEvent({ kind: "session", duration_seconds: elapsed }).catch(() => {});
+  playStartedAt = performance.now();
+}, 30000);
 
 const statusText = document.querySelector("#statusText");
 const serviceBadge = document.querySelector("#serviceBadge");
@@ -101,6 +145,8 @@ let streamingPlayback = null;
 let streamingAudioContext = null;
 let avatarSocket = null;
 let avatarReady = false;
+let customParentActive = false;
+let customAvatarConfigured = false;
 let avatarReconnectTimer = null;
 let avatarReconnectDelayMs = 1200;
 let avatarDrawing = false;
@@ -796,6 +842,7 @@ async function receiveAvatarBinary(blob) {
 }
 
 function scheduleAvatarReconnect() {
+  if (customParentActive && !customAvatarConfigured) return;
   if (avatarReconnectTimer) return;
   avatarReconnectTimer = setTimeout(() => {
     avatarReconnectTimer = null;
@@ -805,6 +852,7 @@ function scheduleAvatarReconnect() {
 }
 
 function connectAvatar() {
+  if (customParentActive && !customAvatarConfigured) return;
   if (avatarSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(avatarSocket.readyState)) return;
   setAvatarState("爸爸老师正在准备");
   const socket = new WebSocket(avatarWebSocketUrl());
@@ -1482,6 +1530,16 @@ async function sendStreamingRequest({ endpoint, body, continuous = false, signal
       activeRequestSource = "";
       drawingBoard.close();
     }
+    if (turnCommitted && activityTransition && source !== "drawing-observation") {
+      const mapped = activityTransition.activity === "drawing" ? "drawing"
+        : activityTransition.activity === "story" ? "story"
+        : ["game", "english", "numbers", "colors", "animals"].includes(activityTransition.activity) ? "game" : "";
+      if (mapped && activityTransition.action === "set" && Number.isInteger(activityTransition.step)) {
+        const step = `${{ drawing: "画画", story: "故事", game: "互动游戏" }[mapped]} · 第 ${activityTransition.step} 步`;
+        beginPlayActivity(mapped, step);
+        void savePlayEvent({ kind: "stage", activity: mapped, step }).catch(() => {});
+      } else if (mapped && activityTransition.action === "clear" && playActivity === mapped) endPlayActivity();
+    }
     hideLiveTurn();
     if (source !== "drawing-observation" && !mediaLookupStarted) void loadMediaSuggestions(childTurnText, assistantText);
     stopBargeInMonitor();
@@ -1886,6 +1944,7 @@ async function startActivityConversation(button) {
     // change. Do not pause a live input segment for a request we cannot send.
     if (!conversationActive || activeRequestController
         || !activityEnabled(String(button.dataset.activity || ""))) return;
+    beginPlayActivity(button.dataset.activity === "story" ? "story" : "game", String(button.dataset.activity || ""));
     // The chosen activity replaces an unfinished listening segment. Keep the
     // microphone open, then let normal streamed playback resume listening.
     stopVadLoop();
@@ -2026,6 +2085,10 @@ function getMusicStudio() {
   if (musicStudio) return musicStudio;
   musicStudio = new MusicStudio({
     onSpeak: speakMusicInstruction,
+    onProgress: progress => {
+      beginPlayActivity(progress.activity, progress.step);
+      void savePlayEvent(progress).catch(() => {});
+    },
     onThemeRequest: prepareMusicTheme,
     onListeningChange: allowed => {
       // A mode change cancels the old explanation before its idle state can listen.
@@ -2043,6 +2106,7 @@ function getMusicStudio() {
     acquireMicrophone: acquireMusicMicrophone,
     transcribe: transcribeMusicRecording,
     onClose: () => {
+      endPlayActivity();
       cancelMusicTheme();
       cancelMusicExplanation();
       if (!pageIsLeaving && musicConversationWasActive && conversationActive && !activeRequestController) beginContinuousSegment();
@@ -2226,7 +2290,17 @@ function getChessBoard() {
   if (chessBoard) return chessBoard;
   chessBoard = new globalThis.ChessBoard({
     onSpeak: speakChessInstruction,
-    onClose: () => cancelChessExplanation(true),
+    onClose: () => { endPlayActivity(); cancelChessExplanation(true); },
+    onProgress: async progress => {
+      playStep = progress.step;
+      try {
+        const saved = await savePlayEvent({ ...progress, activity: "chess" });
+        if (progress.kind === "challenge" && progress.result === "win" && saved.summary) {
+          chessBoard?.setUnlockedLevel(saved.summary.unlocked_chess_level);
+          chessBoard?.setRewardReceipt(true);
+        }
+      } catch (_) { if (progress.kind === "challenge" && progress.result === "win") chessBoard?.setRewardReceipt(false); }
+    },
   });
   return chessBoard;
 }
@@ -2239,7 +2313,7 @@ async function openChessActivity() {
   try {
     if (typeof globalThis.ChessBoard !== "function") {
       await Promise.race([
-        import("/chess-board.js?v=20260910-playtime"),
+        import("/chess-board.js?v=20260927-journey2"),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("chess module timeout")), 5000); }),
       ]);
     }
@@ -2253,6 +2327,10 @@ async function openChessActivity() {
     const board = getChessBoard();
     if (board.isOpen && conversationActive && !activeRequestController && !segmentRecording) beginContinuousSegment();
     board.open();
+    beginPlayActivity("chess", board.mode === "learn" ? board.lessonTitle.textContent : board.challengeLevel);
+    void fetch("/api/activities/summary").then(async response => {
+      if (response.ok && board.isOpen) board.setUnlockedLevel((await response.json()).unlocked_chess_level);
+    }).catch(() => {});
   } catch (_) {
     if (generation !== chessOpenGeneration) return;
     setStatus("棋盘正在准备，其他活动可以继续用", "idle");
@@ -2290,6 +2368,7 @@ function getDrawingBoard() {
       }
     },
     onClose() {
+      endPlayActivity();
       if (activeRequestController && activeRequestSource.startsWith("drawing")) {
         activeRequestController.abort();
         clearResponseQueue();
@@ -2306,6 +2385,7 @@ async function openDrawingActivity(button) {
   chessBoard?.close();
   const board = getDrawingBoard();
   board.open();
+  beginPlayActivity("drawing", "画板");
   void prepareStreamingAudio();
   try {
     await interruptActiveReply();
@@ -2336,6 +2416,7 @@ for (const button of activityButtons) {
   });
 }
 function handlePageHide() {
+  endPlayActivity();
   pageIsLeaving = true;
   cancelMediaSuggestionLookup();
   mediaPlaybackGeneration += 1;
@@ -2435,8 +2516,9 @@ function setCameraActionState(open) {
     recordVideoButton.setAttribute("aria-label", "录一小段给爸爸看");
   }
   cameraButton.dataset.open = String(open);
+  cameraToolbar.dataset.cameraOpen = String(open);
   cameraButton.setAttribute("aria-pressed", String(open));
-  if (cameraState) cameraState.textContent = open ? "开" : "关";
+  if (cameraState) cameraState.textContent = open ? "关" : "打开摄像头";
   cameraButton.title = open ? "关闭摄像头" : "打开摄像头";
   cameraButton.setAttribute("aria-label", open ? "关闭摄像头" : "打开摄像头");
 }
@@ -2753,6 +2835,19 @@ async function checkHealth() {
     const payload = await response.json();
     if (!response.ok) throw new Error("本地服务不可用");
     globalThis.familyInteractionTimingSupported = payload.interaction_timing_supported === true;
+    const oldAvatarMode = `${customParentActive}:${customAvatarConfigured}`;
+    customParentActive = payload.parent_identity_active === true;
+    customAvatarConfigured = payload.parent_avatar_configured === true;
+    if (`${customParentActive}:${customAvatarConfigured}` !== oldAvatarMode) {
+      avatarImage.src = `/api/avatar?v=parent-${Date.now()}`;
+      if (customParentActive && !customAvatarConfigured) {
+        avatarReady = false;
+        avatarAcceptFrames = false;
+        avatarSocket?.close();
+        avatarCanvas.hidden = true;
+        setAvatarState("家长形象已准备，动态画面暂时离线");
+      } else connectAvatar();
+    }
     setAvatarIdleAvailable(payload.avatar_idle_ready === true);
     const localReady = payload.stt_ready && payload.tts_ready;
     const configured = payload.llm_configured && localReady;

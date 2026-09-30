@@ -300,6 +300,80 @@ class MemoryStore:
                 },
             )
 
+    def record_activity_event(self, payload: dict[str, Any]) -> bool:
+        """Append one small, idempotent play receipt; never store raw media."""
+        event_id = str(uuid.UUID(str(payload.get("event_id", ""))))
+        clean = {"event_id": event_id, "activity": str(payload.get("activity", "")),
+                 "kind": str(payload.get("kind", "")), "step": str(payload.get("step", ""))[:80],
+                 "duration_seconds": min(3600, max(0, int(payload.get("duration_seconds", 0)))),
+                 "level": str(payload.get("level", "")), "result": str(payload.get("result", "")),
+                 "independent": bool(payload.get("independent", False))}
+        if clean["activity"] not in {"chess", "drawing", "piano", "singing", "story", "game"}:
+            raise ValueError("unknown play activity")
+        if clean["kind"] not in {"session", "stage", "challenge"}:
+            raise ValueError("unknown play event")
+        if clean["kind"] == "challenge" and (clean["activity"] != "chess" or clean["level"] not in
+                                              {"beginner", "intermediate", "advanced"} or clean["result"] not in
+                                              {"win", "loss", "draw"}):
+            raise ValueError("invalid chess result")
+        with self._lock:
+            for item in self._read_jsonl(self.learning_events_path):
+                if item.get("event_type") == "activity_play" and item.get("payload", {}).get("event_id") == event_id:
+                    if item.get("payload") != clean:
+                        raise ValueError("activity receipt conflicts with an existing event")
+                    return False
+            if clean["kind"] == "challenge":
+                available = self.get_activity_summary()["unlocked_chess_level"]
+                order = {"beginner": 0, "intermediate": 1, "advanced": 2}
+                if order[clean["level"]] > order[available]:
+                    raise ValueError("chess level is not unlocked")
+            self._append_jsonl(self.learning_events_path, {"created_at": _now(), "event_type": "activity_play", "payload": clean})
+            return True
+
+    def redeem_activity_reward(self, reward_id: str) -> bool:
+        reward_id = str(uuid.UUID(str(reward_id)))
+        with self._lock:
+            events = self._read_jsonl(self.learning_events_path)
+            if not any(item.get("event_type") == "activity_play" and item.get("payload", {}).get("event_id") == reward_id
+                       and item.get("payload", {}).get("kind") == "challenge" and item.get("payload", {}).get("result") == "win"
+                       for item in events):
+                raise KeyError("reward not found")
+            if any(item.get("event_type") == "activity_reward_redeemed" and item.get("payload", {}).get("reward_id") == reward_id
+                   for item in events):
+                return False
+            self._append_jsonl(self.learning_events_path, {"created_at": _now(), "event_type": "activity_reward_redeemed",
+                                                         "payload": {"reward_id": reward_id}})
+            return True
+
+    def get_activity_summary(self) -> dict[str, Any]:
+        events = self.get_recent_learning_events(limit=None)
+        plays = [item for item in events if item.get("event_type") == "activity_play"]
+        redeemed = {item.get("payload", {}).get("reward_id") for item in events
+                    if item.get("event_type") == "activity_reward_redeemed"}
+        activities: dict[str, dict[str, Any]] = {}
+        rewards = []
+        unlocked = "beginner"
+        for item in plays:
+            payload = item.get("payload", {})
+            name = payload.get("activity", "")
+            if name not in {"chess", "drawing", "piano", "singing", "story", "game"}:
+                continue
+            bucket = activities.setdefault(name, {"seconds": 0, "sessions": 0, "step": "", "last_result": ""})
+            if payload.get("kind") == "session":
+                bucket["seconds"] += min(3600, max(0, int(payload.get("duration_seconds", 0))))
+                bucket["sessions"] += 1
+            if payload.get("step"):
+                bucket["step"] = payload["step"]
+            if payload.get("kind") == "challenge":
+                bucket["last_result"] = payload.get("result", "")
+                if payload.get("result") == "win":
+                    if payload.get("level") == "beginner": unlocked = "intermediate" if unlocked == "beginner" else unlocked
+                    elif payload.get("level") == "intermediate": unlocked = "advanced"
+                    rewards.append({"id": payload.get("event_id"), "level": payload.get("level"),
+                                    "created_at": item.get("created_at"),
+                                    "status": "redeemed" if payload.get("event_id") in redeemed else "pending"})
+        return {"activities": activities, "rewards": list(reversed(rewards)), "unlocked_chess_level": unlocked}
+
     def record_interaction_interval(self, payload: dict[str, Any]) -> bool:
         """Record elapsed frontend contact time independently of voice success."""
         clean = normalize_interval(payload)
@@ -1189,6 +1263,7 @@ class MemoryStore:
             "memories": memories[-12:],
             "skill_graph": self.get_skill_graph(),
             "current_activity": self.get_activity_state(),
+            "play_summary": self.get_activity_summary(),
             "next_activity": self.next_activity(),
             "parent_messages": self.get_parent_messages(limit=20),
             "growth_journal": self.get_growth_journal(),

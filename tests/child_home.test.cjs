@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const read = (file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
 const html = read("frontend/index.html");
@@ -24,13 +25,44 @@ test("child home keeps one conversation log and a real three-level activity path
   assert.match(app, /openMusicActivity\(button\.dataset\.musicMode\)/);
 });
 
-test("inline picture-in-picture reuses frames and does not enter fullscreen", () => {
+test("inline picture-in-picture reuses frames and immersive dad view stays in the page", () => {
   assert.match(callView, /this\.surface\.classList\.add\('call-view'\)/);
   assert.match(callView, /frame\.addEventListener\('click', handler\)/);
   assert.match(callView, /this\.primary = this\.primary === 'dad' \? 'child' : 'dad'/);
-  assert.doesNotMatch(callView, /requestFullscreen|document\.body\.style\.overflow|\.inert/);
+  assert.doesNotMatch(callView, /requestFullscreen|\.inert/);
+  assert.match(html, /id="dadExpandButton"[\s\S]*aria-label="放大爸爸老师画面"/);
+  assert.match(callCss, /\.is-dad-immersive/);
   assert.match(callCss, /\[data-call-primary="dad"\] \.child-video/);
   assert.match(callCss, /\[data-call-primary="child"\] \.dad-video \.video-frame/);
+});
+
+test("dad expand button toggles a large voice view and Escape restores page scroll", async () => {
+  const { CallView } = await import(pathToFileURL(path.join(__dirname, "../frontend/call-view.js")).href);
+  const handlers = new Map();
+  const node = () => ({ handlers: new Map(), addEventListener(type, fn) { this.handlers.set(type, fn); },
+    removeEventListener(type) { this.handlers.delete(type); }, setAttribute(name, value) { this[name] = value; },
+    closest() { return null; }, focus() {} });
+  const dad = node(), child = node(), button = node(), label = { textContent: "" };
+  button.querySelector = () => label;
+  const classes = new Set();
+  const doc = { body: { style: { overflow: "auto" } }, addEventListener(type, fn) { handlers.set(type, fn); },
+    removeEventListener(type) { handlers.delete(type); } };
+  const surface = { ownerDocument: doc, dataset: {}, classList: {
+    add(name) { classes.add(name); }, remove(name) { classes.delete(name); },
+    toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
+  }, querySelector(selector) { return selector === "#dadExpandButton" ? button
+    : selector.includes(".dad-video") ? dad : child; } };
+  const view = new CallView(surface);
+  button.handlers.get("click")({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(classes.has("is-dad-immersive"), true);
+  assert.equal(doc.body.style.overflow, "hidden");
+  assert.equal(button["aria-pressed"], "true");
+  assert.equal(label.textContent, "收起");
+  handlers.get("keydown")({ key: "Escape", preventDefault() {} });
+  assert.equal(classes.has("is-dad-immersive"), false);
+  assert.equal(doc.body.style.overflow, "auto");
+  assert.equal(button["aria-pressed"], "false");
+  view.destroy();
 });
 
 test("camera controls use distinct icons and playback owns the speaking state", () => {

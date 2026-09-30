@@ -5,16 +5,48 @@
 .stage-card.call-view .dad-video .video-frame { height: var(--call-height); aspect-ratio: auto; max-height: none; }
 .stage-card.call-view .child-video { position: absolute; right: 14px; bottom: 14px; z-index: 5; width: clamp(168px, 22vw, 252px); }
 .stage-card.call-view .child-video .video-frame { aspect-ratio: 4 / 3; max-height: none; cursor: pointer; border: 3px solid var(--paper); box-shadow: 0 4px 20px oklch(0.29 0.031 164 / 0.18); }
-.stage-card.call-view .child-video .camera-toolbar { position: absolute; right: 0; bottom: -54px; }
+.stage-card.call-view .child-video .camera-toolbar { position: absolute; right: 8px; bottom: 8px; z-index: 4; }
+.stage-card.call-view[data-call-primary="dad"] .child-video .video-placeholder { padding: 10px; gap: 0; }
+.stage-card.call-view[data-call-primary="dad"] .child-video .video-placeholder strong,
+.stage-card.call-view[data-call-primary="dad"] .child-video .video-placeholder span { display: none; }
+.stage-card.call-view[data-call-primary="dad"] .child-video .child-portrait { width: 58px; height: 58px; margin: -18px 0 0; }
+.stage-card.call-view .camera-toolbar[hidden], .stage-card.call-view .camera-tool[hidden] { display: none; }
+.stage-card.call-view .camera-toolbar[data-camera-open="false"] .camera-toggle {
+  display: flex;
+  width: auto;
+  min-width: 126px;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.stage-card.call-view .camera-toolbar[data-camera-open="false"] .camera-tool:not(.camera-toggle) { display: none; }
 .stage-card.call-view[data-call-primary="dad"] .child-video { bottom: 68px; }
 .stage-card.call-view[data-call-primary="child"] .dad-video .video-frame { position: absolute; right: 14px; bottom: 14px; z-index: 6; width: clamp(168px, 22vw, 252px); height: auto; aspect-ratio: 4 / 3; cursor: pointer; border: 3px solid var(--paper); box-shadow: 0 4px 20px oklch(0.29 0.031 164 / 0.18); }
 .stage-card.call-view[data-call-primary="child"] .child-video { position: static; width: auto; }
 .stage-card.call-view[data-call-primary="child"] .child-video .video-frame { height: var(--call-height); aspect-ratio: auto; max-height: none; cursor: default; border: 0; box-shadow: none; }
-.stage-card.call-view[data-call-primary="child"] .child-video .camera-toolbar { right: 12px; bottom: 12px; }
+.stage-card.call-view[data-call-primary="child"] .child-video .camera-toolbar { left: 12px; right: auto; bottom: 12px; }
 .stage-card.call-view [role="button"].video-frame:focus-visible { outline: 4px solid var(--accent); outline-offset: 3px; }
+.stage-card.call-view .dad-expand-button { position: absolute; z-index: 15; top: 12px; right: 12px; display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 58px; min-height: 48px; padding: 7px 10px; border: 1px solid #d8e1d5; border-radius: 14px; color: #173e36; background: #fffdf2f2; box-shadow: 0 4px 16px #173e3633; font: 700 13px system-ui, sans-serif; cursor: pointer; touch-action: manipulation; }
+.stage-card.call-view .dad-expand-button svg { width: 22px; height: 22px; flex: none; }
+.stage-card.call-view .dad-expand-button:focus-visible { outline: 3px solid #bd780f; outline-offset: 2px; }
+.stage-card.call-view.is-dad-immersive { position: fixed; inset: 0; z-index: 10015; display: flex; flex-direction: column; width: 100%; height: 100dvh; max-height: none; margin: 0; padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom)); overflow: hidden; border: 0; border-radius: 0; background: #fffaf0; }
+.stage-card.call-view.is-dad-immersive .stage-heading, .stage-card.call-view.is-dad-immersive .stage-footer, .stage-card.call-view.is-dad-immersive .vision-result, .stage-card.call-view.is-dad-immersive .activity-row, .stage-card.call-view.is-dad-immersive .play-choices { display: none !important; }
+.stage-card.call-view.is-dad-immersive .video-pair { flex: 1 1 auto; min-height: 0; }
+.stage-card.call-view.is-dad-immersive .dad-video { display: flex; flex-direction: column; height: 100%; }
+.stage-card.call-view.is-dad-immersive .dad-video .video-frame { flex: 1 1 auto; height: 100%; min-height: 0; border-radius: 18px; }
+.stage-card.call-view.is-dad-immersive .dad-video .video-meta { flex: none; }
+.stage-card.call-view.is-dad-immersive .conversation-controls { flex: none; display: block; padding: 8px 0 0; }
+.stage-card.call-view.is-dad-immersive .voice-control { width: min(100%, 520px); margin: 0 auto; }
+.stage-card.call-view.is-dad-immersive .child-video { bottom: 16px; }
 @media (max-width: 640px) {
   .stage-card.call-view { --call-height: clamp(280px, 43vh, 360px); }
   .stage-card.call-view .child-video, .stage-card.call-view[data-call-primary="child"] .dad-video .video-frame { right: 8px; bottom: 8px; width: clamp(112px, 32vw, 144px); }
+  .stage-card.call-view[data-call-primary="dad"] .child-video .camera-tool:not(.camera-toggle) { display: none; }
+  .stage-card.call-view[data-call-primary="dad"] .child-video .camera-toolbar[data-camera-open="false"] { display: block; width: 96px; }
+  .stage-card.call-view[data-call-primary="dad"] .child-video .camera-toolbar[data-camera-open="false"] .camera-toggle { width: 96px; min-width: 0; padding: 4px; font-size: 10px; }
+  .stage-card.call-view[data-call-primary="dad"] .child-video .child-portrait { display: none; }
 }
 
 @media (max-width: 370px) {

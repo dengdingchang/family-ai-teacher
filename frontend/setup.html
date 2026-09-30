@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>家长录制引导 · 爸爸老师</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/setup.css?v=20260926-7" />
+    <script src="/setup.js?v=20260926-5" defer></script>
+  </head>
+  <body>
+    <main class="setup-shell">
+      <header class="setup-topbar"><a href="/parent" aria-label="返回家长空间">← 家长空间</a><span>爸爸老师 · 家长首次设置</span></header>
+      <div class="setup-grid">
+        <section class="setup-main" aria-labelledby="setupTitle">
+          <p class="eyebrow">把你的陪伴，带到孩子面前</p>
+          <h1 id="setupTitle">先录一段，<br />让孩子听见熟悉的你。</h1>
+          <p class="setup-lead">跟着提示完成现场录制。系统会检查光线、清晰度和声音，不合格会告诉你怎么重录。试听确认后才会用在孩子页面。</p>
+          <ol class="progress" aria-label="设置进度">
+            <li id="progressReady" aria-current="step"><span>1</span>准备</li>
+            <li id="progressRecord"><span>2</span>录制</li>
+            <li id="progressReview"><span>3</span>试听确认</li>
+          </ol>
+          <div id="guideReady" class="guide-panel">
+            <h2>准备好再开始</h2>
+            <ul class="guide-list">
+              <li><span>☀</span>面对光线，别背对窗户</li>
+              <li><span>◯</span>让脸和肩膀处于取景框中间</li>
+              <li><span>♫</span>找安静的地方，按正常语速说话</li>
+            </ul>
+            <label class="consent"><input id="consent" type="checkbox" /><span>我确认录制的是我本人的形象和声音。同意把本次声音临时发送到 Windows 爸爸老师服务生成声音特征；原始音频不会保存，视频原片留在此页面。在我试听并确认启用后，一张处理后的头像帧会发送给 AI Station 的数字人模型。我可以随时删除。</span></label>
+            <p class="route-note">使用公网地址时，录制声音会经 Cloudflare 转发到 Windows；家庭私网 HTTPS 地址不经过公网入口。</p>
+            <button id="openCamera" class="main-button" type="button">打开摄像头和麦克风</button>
+            <p class="skip-note"><a href="/">先使用原有爸爸老师</a></p>
+          </div>
+          <div id="guideRecord" class="guide-panel" hidden>
+            <h2>看着镜头，读完这句话</h2>
+            <blockquote>“你好，我会陪你一起发现有趣的事情。今天你想先看一看、画一画，还是讲个小故事？”</blockquote>
+            <p class="guide-hint">开始后会录制约十秒。读完后保持看着镜头，直到倒计时结束。</p>
+            <div class="guide-actions"><button id="startRecording" class="main-button" type="button">开始录制</button><button id="cancelRecording" class="secondary-button" type="button">重新准备</button></div>
+          </div>
+          <div id="guideReview" class="guide-panel" hidden>
+            <h2>先听听，再决定</h2>
+            <p>画面与声音质量通过后，播放下面的试讲。如果不像你，随时重录。</p>
+            <div id="qualityResults" class="quality-results" aria-label="质量检查结果"></div>
+            <audio id="voicePreview" controls aria-label="克隆声音试听"></audio>
+            <div class="guide-actions"><button id="activate" class="main-button" type="button">确认给孩子使用</button><button id="recordAgain" class="secondary-button" type="button">重录一次</button></div>
+          </div>
+          <div id="guideDone" class="guide-panel" hidden>
+            <h2>已经准备好陪孩子了</h2>
+            <p>孩子页面刷新后会显示你的形象，下一轮会用你的声音。可以回家长空间随时重新录制或删除。</p>
+            <a class="main-button as-link" href="/">去看孩子页面 ↗</a>
+          </div>
+          <p id="setupStatus" class="setup-status" role="status" aria-live="polite"></p>
+        </section>
+        <aside class="capture-card" aria-label="录制画面">
+          <div class="capture-view">
+            <video id="liveCamera" autoplay playsinline muted></video>
+            <video id="recordedVideo" playsinline controls hidden></video>
+            <img id="confirmedPortrait" alt="本次录制选取的家长形象" hidden />
+            <div id="cameraPlaceholder" class="camera-placeholder"><span class="placeholder-face">☺</span><strong>你的画面会出现在这里</strong><small>打开摄像头后，先看看光线和位置</small></div>
+            <div class="face-guide" aria-hidden="true"></div>
+            <span id="recordTimer" class="record-timer" hidden>录制中 · 10</span>
+          </div>
+          <p class="capture-caption">视频原片只留在当前页面。声音录制临时传给 Windows 处理，不落盘；确认后 Windows 保存头像帧和声音特征，AI Station 保存用于动态画面的一张头像帧。</p>
+          <section class="current-identity"><span id="identityState">正在读取当前形象…</span><button id="deleteIdentity" type="button" hidden>删除我的形象与声音</button></section>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

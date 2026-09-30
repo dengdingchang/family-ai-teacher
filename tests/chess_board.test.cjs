@@ -47,27 +47,81 @@ async function fixture(options = {}) {
 function point(square) {
   return { x: (square.charCodeAt(0) - 97) * 100 + 50, y: (8 - Number(square[1])) * 100 + 50 };
 }
+function moveLesson(board, index = 2) { board.lessonIndex = index; board.reset(); }
 
-test("completion dialog keeps click and voice advancement idempotent and final restart explicit", async () => {
+test("a child sees the board, names pieces, tries moves, then chooses a move before play", async () => {
   const f = await fixture(); f.board.open();
   try {
-    f.click("e2"); f.click("e3");
+    assert.match(f.board.lessonTitle.textContent, /看看棋盘/);
+    assert.equal(f.board.cells.get("a1").symbol.textContent, "", "pieces stay out of the board introduction");
+    f.click("a4"); assert.equal(f.board.lessonComplete, false);
+    f.click("b4");
     assert.equal(f.board.celebration.hidden, false);
     assert.equal(f.doc.activeElement, f.board.continueButton);
     const count = f.speech.length;
-    f.click("e3"); assert.equal(f.speech.length, count);
+    f.click("b4"); assert.equal(f.speech.length, count);
     f.board.continueButton.dispatch("click"); f.board.continueButton.dispatch("click");
     f.board.handleVoiceCommand("下一课");
     assert.equal(f.board.lessonIndex, 1); assert.equal(f.board.celebration.hidden, true);
-    f.click("d4"); f.click("d7"); f.board.handleVoiceCommand("下一课");
-    f.click("d4"); f.click("f5");
-    assert.match(f.board.continueButton.textContent, /再学一遍/);
-    assert.match(f.board.successText.textContent, /三课都完成/);
+    assert.match(f.board.lessonTitle.textContent, /认识三颗棋子/);
+    f.click("d4"); assert.equal(f.board.pieceStep, 0, "the named piece is the target");
+    f.click("e2"); f.click("d4"); f.click("c3");
+    assert.equal(f.board.lessonComplete, true);
+    f.board.nextLesson(); assert.equal(f.board.lessonIndex, 2);
+    f.click("e2"); f.click("e3"); f.board.nextLesson();
+    f.click("d4"); f.click("d7"); f.board.nextLesson();
+    f.click("d4"); f.click("f5"); f.board.nextLesson();
+    assert.equal(f.board.lessonIndex, 5);
+    f.click("g1"); f.click("h1");
+    assert.equal(f.board.game.isCheckmate(), true);
+    f.board.nextLesson(); assert.equal(f.board.lessonIndex, 6);
+    f.click("e2"); assert.equal(f.board.pieceStep, 0, "quiz does not accept a random piece");
+    f.click("d4"); f.click("c3"); f.click("e2");
+    assert.equal(f.board.lessonComplete, true);
+    f.board.nextLesson(); assert.equal(f.board.lessonIndex, 7);
+    f.click("d4"); f.click("d5");
+    assert.equal(f.board.lessonComplete, true);
+    assert.match(f.board.continueButton.textContent, /和爸爸下棋/);
     f.board.close(); f.board.open();
     assert.equal(f.board.celebration.hidden, false);
     assert.equal(f.board.confetti, null);
     f.board.continueButton.dispatch("click"); f.board.continueButton.dispatch("click");
-    assert.equal(f.board.lessonIndex, 0); assert.equal(f.board.lessonComplete, false);
+    assert.equal(f.board.mode, "play"); assert.equal(f.board.lessonIndex, 7);
+    f.board.handleVoiceCommand("跟爸爸学"); assert.equal(f.board.lessonIndex, 7);
+    f.board.handleVoiceCommand("再学一遍"); assert.equal(f.board.lessonIndex, 0);
+  } finally { f.board.destroy(); }
+});
+
+test("quiz distinguishes independent answers from guessing or hints", async () => {
+  const progress = [], f = await fixture({ onProgress: event => progress.push(event) });
+  f.board.open();
+  try {
+    moveLesson(f.board, 6);
+    assert.equal(f.board.guidancePhase, "none");
+    f.click("d4"); f.click("c3"); f.click("e2");
+    assert.equal(progress.at(-1).kind, "stage");
+    assert.equal(progress.at(-1).independent, true);
+    f.board.reset();
+    f.click("e2"); f.board.hint();
+    f.click("d4"); f.click("c3"); f.click("e2");
+    assert.equal(progress.at(-1).independent, false);
+    assert.equal(progress.some(item => item.kind === "challenge"), false);
+  } finally { f.board.destroy(); }
+});
+
+test("only a real checkmate win unlocks the next Dad level and reports one reward", async () => {
+  const progress = [], f = await fixture({ onProgress: event => progress.push(event) });
+  f.board.open();
+  try {
+    f.board.startMode("play");
+    f.board.game.load("7k/5K2/6P1/8/8/8/8/6R1 w - - 0 1");
+    f.click("g1"); f.click("h1");
+    assert.equal(f.board.game.isCheckmate(), true);
+    assert.equal(progress.filter(item => item.kind === "challenge" && item.result === "win").length, 1);
+    assert.equal(f.board.unlockedLevel, "beginner", "level waits for the saved parent receipt");
+    f.board.setUnlockedLevel("intermediate");
+    f.board.nextChallengeLevel();
+    assert.equal(f.board.challengeLevel, "intermediate");
   } finally { f.board.destroy(); }
 });
 function assertVisiblePath(board, move) {
@@ -80,13 +134,13 @@ function assertVisiblePath(board, move) {
   assert.equal(board.guideLine.getAttribute("x2"), String(to.x)); assert.equal(board.guideLine.getAttribute("y2"), String(to.y));
 }
 test("three lessons require the stated legal target and explain wrong moves without changing the board", async () => {
-  const f = await fixture(); f.board.open();
+  const f = await fixture(); f.board.open(); moveLesson(f.board);
   try {
-    assert.match(f.speech.at(-1), /e2.*e3/);
+    assert.match(f.speech.at(-1), /白兵.*星星/);
     const initial = f.board.game.fen();
     f.click("e2"); assert.match(f.board.cells.get("e3").cell.className, /is-legal/);
     f.click("e5"); assert.equal(f.board.game.fen(), initial); assert.match(f.speech.at(-1), /不能走/);
-    f.click("e4"); assert.equal(f.board.game.fen(), initial); assert.match(f.speech.at(-1), /可以走.*这一课.*e3/);
+    f.click("e4"); assert.equal(f.board.game.fen(), initial); assert.match(f.speech.at(-1), /可以走.*这次.*星星格/);
     f.click("e3"); assert.equal(f.board.lessonComplete, true); assert.equal(f.board.game.get("e3").type, "p");
     assert.equal(f.timers.size, 0, "lessons never start an opponent move");
     f.board.nextLesson(); f.click("d4"); f.click("d7"); assert.equal(f.board.lessonComplete, true);
@@ -97,7 +151,7 @@ test("three lessons require the stated legal target and explain wrong moves with
 });
 
 test("the first lesson uses visible source, path and target guidance without relying on its star", async () => {
-  const f = await fixture(); f.board.open();
+  const f = await fixture(); f.board.open(); moveLesson(f.board);
   try {
     assert.equal(f.board.guidancePhase, "source");
     assert.match(f.board.cells.get("e2").cell.className, /is-guidance-source/);
@@ -114,19 +168,19 @@ test("the first lesson uses visible source, path and target guidance without rel
 });
 
 test("each completed lesson speaks concrete praise, marks its destination and waits for the child to continue", async () => {
-  const f = await fixture(); f.board.open();
+  const f = await fixture(); f.board.open(); moveLesson(f.board);
   try {
     const lessons = [
-      ["e2", "e3", /白兵向前走了一格.*e2.*e3/, /白兵向前一步/],
-      ["d4", "d7", /白车沿着直线走了三格.*d4.*d7/, /白车沿直线/],
-      ["d4", "f5", /白马向右两格、再向上一格.*d4.*f5/, /白马拐个弯/],
+      ["e2", "e3", /白兵向前走了一格.*星星格/, /白兵向前一步/],
+      ["d4", "d7", /白车沿着直线走了三格.*星星格/, /白车沿直线/],
+      ["d4", "f5", /白马向右两格、再向上一格.*星星格/, /白马拐个弯/],
     ];
     for (let index = 0; index < lessons.length; index++) {
       const [from, to, praise, visible] = lessons[index];
       f.click(from); f.click(to);
       const speech = f.speech.at(-1);
       assert.match(speech, praise, "the real onSpeak callback receives action-specific success text");
-      assert.match(speech, index < 2 ? /说‘下一课’/ : /再学一遍.*和爸爸下棋/);
+      assert.match(speech, /说‘下一课’/);
       assert.ok(speech.length <= 200, "host TTS accepts the complete explanation");
       assert.match(f.board.cells.get(to).cell.className, /is-complete/);
       assert.equal(f.board.cells.get(to).target.textContent, "✓");
@@ -139,7 +193,7 @@ test("each completed lesson speaks concrete praise, marks its destination and wa
       await settle();
       assert.equal(f.speech.length, count, "extra taps cannot interrupt success narration");
       assert.equal(f.board.game.fen(), position);
-      assert.equal(f.board.lessonIndex, index, "completion never forces the next lesson");
+      assert.equal(f.board.lessonIndex, index + 2, "completion never forces the next lesson");
       assert.equal(f.timers.size, 0);
       if (index < 2) {
         assert.equal(f.board.handleVoiceCommand("爸爸老师，下一课"), true);
@@ -154,7 +208,7 @@ test("each completed lesson speaks concrete praise, marks its destination and wa
 
 test("chess voice controls reject unrelated speech and never skip an unfinished lesson", async () => {
   const { ChessBoard } = await boardModule;
-  for (const [text, expected] of [["爸爸老师，下一课吧", "next"], ["下一課", "next"], ["给我提示一下", "hint"], ["再听一遍", "repeat"], ["重来这一步", "reset"], ["再学一遍", "learn"], ["和爸爸下棋", "play"], ["悔棋", "undo"], ["退出棋盘", "close"]]) {
+  for (const [text, expected] of [["爸爸老师，下一课吧", "next"], ["下一課", "next"], ["给我提示一下", "hint"], ["再听一遍", "repeat"], ["重来这一步", "reset"], ["再学一遍", "restart"], ["和爸爸下棋", "play"], ["悔棋", "undo"], ["退出棋盘", "close"]]) {
     assert.equal(ChessBoard.parseVoiceCommand(text), expected, text);
   }
   for (const text of ["不要下一课", "我不想悔棋", "爸爸刚才说下一课", "小兔子重新开始跑了", "我想听一个故事", "下一课讲什么", "把图片关闭", "a".repeat(81), null]) {
@@ -167,7 +221,7 @@ test("chess voice controls reject unrelated speech and never skip an unfinished 
     assert.equal(f.board.handleVoiceCommand("下一课"), true);
     assert.equal(f.board.lessonIndex, 0); assert.equal(f.board.game.fen(), initial);
     assert.match(f.speech.at(-1), /先完成这一步/);
-    f.board.handleVoiceCommand("提示一下"); assert.equal(f.board.guidancePhase, "path");
+    f.board.handleVoiceCommand("提示一下"); assert.equal(f.board.guidancePhase, "source");
     const hint = f.speech.at(-1); f.board.handleVoiceCommand("再听一遍"); assert.equal(f.speech.at(-1), hint);
     f.board.handleVoiceCommand("和爸爸下棋"); assert.equal(f.board.mode, "play");
     f.click("e2"); f.click("e4");
@@ -179,7 +233,7 @@ test("chess voice controls reject unrelated speech and never skip an unfinished 
 
 test("late success narration cannot overwrite a voice-requested next lesson or resume after closing", async () => {
   const pending = [];
-  const f = await fixture({ onSpeak: text => new Promise(resolve => pending.push({ text, resolve })) }); f.board.open();
+  const f = await fixture({ onSpeak: text => new Promise(resolve => pending.push({ text, resolve })) }); f.board.open(); moveLesson(f.board);
   try {
     f.click("e2"); f.click("e3");
     const success = pending.at(-1);
@@ -187,11 +241,11 @@ test("late success narration cannot overwrite a voice-requested next lesson or r
     f.click("e3"); assert.equal(pending.at(-1), success);
     f.board.handleVoiceCommand("下一课");
     const next = pending.at(-1), current = f.board.speechStatus.textContent;
-    assert.match(next.text, /认识白车/);
+    assert.match(next.text, /白车沿直线走/);
     success.resolve({ ok: false, error: "stale synthetic result" }); await settle();
     assert.equal(f.board.speechStatus.textContent, current);
-    assert.equal(f.board.speaking, true); assert.equal(f.board.lessonIndex, 1);
-    f.board.handleVoiceCommand("下一课"); assert.equal(f.board.lessonIndex, 1, "duplicate commands cannot skip an incomplete lesson");
+    assert.equal(f.board.speaking, true); assert.equal(f.board.lessonIndex, 3);
+    f.board.handleVoiceCommand("下一课"); assert.equal(f.board.lessonIndex, 3, "duplicate commands cannot skip an incomplete lesson");
     f.board.close();
     for (const request of pending) request.resolve({ ok: true });
     await settle(); assert.equal(f.timers.size, 0); assert.equal(f.board.speaking, false);
@@ -201,10 +255,10 @@ test("late success narration cannot overwrite a voice-requested next lesson or r
 test("the second and third lessons compute their own source, target and arrow coordinates", async () => {
   const f = await fixture(); f.board.open();
   try {
-    f.board.lessonIndex = 1; f.board.reset();
+    f.board.lessonIndex = 3; f.board.reset();
     assert.equal(f.board.guidancePhase, "source"); assert.match(f.board.cells.get("d4").cell.className, /is-guidance-source/);
     f.click("d4"); assertVisiblePath(f.board, { from: "d4", to: "d7" });
-    f.board.lessonIndex = 2; f.board.reset();
+    f.board.lessonIndex = 4; f.board.reset();
     assert.equal(f.board.guidancePhase, "source"); assert.match(f.board.cells.get("d4").cell.className, /is-guidance-source/);
     f.click("d4"); assertVisiblePath(f.board, { from: "d4", to: "f5" });
   } finally { f.board.destroy(); }
@@ -212,7 +266,7 @@ test("the second and third lessons compute their own source, target and arrow co
 
 test("hint and repeat preserve their lesson visual guidance while narration is still playing", async () => {
   const pending = [];
-  const f = await fixture({ onSpeak: () => new Promise(resolve => pending.push(resolve)) }); f.board.open();
+  const f = await fixture({ onSpeak: () => new Promise(resolve => pending.push(resolve)) }); f.board.open(); moveLesson(f.board);
   try {
     assert.equal(f.board.guidancePhase, "source");
     f.board.repeatButton.dispatch("click");
@@ -380,7 +434,7 @@ test("conversation context is a read-only lesson snapshot and disappears when th
   const f = await fixture();
   try {
     assert.equal(f.board.getConversationContext(), "");
-    f.board.open(); f.click("e2");
+    f.board.open(); moveLesson(f.board); f.click("e2");
     const before = { fen: f.board.game.fen(), history: f.board.game.history(), selected: f.board.selected,
       speech: f.speech.length, timers: f.timers.size, explanation: f.board.lastExplanation };
     const context = f.board.getConversationContext();

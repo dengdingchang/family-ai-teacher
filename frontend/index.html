@@ -7,12 +7,13 @@
     <title>爸爸老师 · 家庭 AI 教室</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css?v=20260910-compact-transcript" />
-    <link rel="stylesheet" href="/call-view.css?v=20260910-large-avatar" />
-    <link rel="stylesheet" href="/drawing-board.css?v=20260910-1" />
-    <link rel="stylesheet" href="/chess-board.css?v=20260910-playtime" />
+    <link rel="stylesheet" href="/call-view.css?v=20260927-immersive" />
+    <link rel="stylesheet" href="/drawing-board.css?v=20260927-touch-paint" />
+    <link rel="stylesheet" href="/chess-board.css?v=20260927-journey" />
     <link rel="stylesheet" href="/music-studio.css?v=20260910-playtime" />
     <link rel="stylesheet" href="/media-viewer.css?v=20260910-replay" />
     <link rel="stylesheet" href="/avatar-companion.css?v=20260910-playtime" />
+    <link rel="stylesheet" href="/visual-refresh.css?v=20260926-family-room2" />
   </head>
   <body>
     <a class="skip-link" href="#recordButton">开始交流</a>
@@ -122,6 +123,7 @@
               <div
                 id="cameraToolbar"
                 class="camera-toolbar"
+                data-camera-open="false"
                 aria-label="画面工具"
               >
                 <button
@@ -134,7 +136,7 @@
                 >
                   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M3 8h12v8H3V8Zm12 3 5-3v8l-5-3v-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-                  </svg><span class="camera-state" aria-hidden="true">关</span>
+                  </svg><span class="camera-state" aria-hidden="true">打开摄像头</span>
                 </button>
                 <button
                   id="captureButton"
@@ -183,6 +185,10 @@
                 hidden
               ></canvas
               ><span class="frame-label">爸爸老师</span>
+              <button id="dadExpandButton" class="dad-expand-button" type="button" aria-label="放大爸爸老师画面" aria-pressed="false" title="放大爸爸老师画面">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                <span class="dad-expand-label">放大</span>
+              </button>
               <div class="voice-bars" aria-hidden="true">
                 <i></i><i></i><i></i><i></i><i></i>
               </div>
@@ -287,6 +293,6 @@
         </details>
       </footer>
     </main>
-  <script type="module" src="/app.js?v=20260910-playtime"></script>
+  <script type="module" src="/app.js?v=20260927-play-progress3"></script>
   </body>
 </html>

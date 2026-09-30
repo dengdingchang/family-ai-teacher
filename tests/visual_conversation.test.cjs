@@ -11,6 +11,7 @@ function conversation(overrides = {}) {
     activeRequestController: null, activeTurnId: null, interruptedRequestController: null,
     mediaResumePending: false,
     activeRequestSource: '', drawingBoard: null, queueGeneration: 1,
+    playActivity: "", beginPlayActivity() {}, endPlayActivity() {}, savePlayEvent: async () => ({}),
     musicStudio: null, mediaViewer: { handleVoiceCommand: () => false, close() {} },
     conversationActive: true, segmentRecording: true, segmentShouldSend: true, segmentPcmChunks: [1],
     avatarReady: false, AbortController, FormData, Blob, DOMException,

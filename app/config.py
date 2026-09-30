@@ -109,6 +109,8 @@ class Settings:
     stt_cuda_library_dir: Path | None = None
     stt_fallback_model_path: Path | None = None
     llm_provider: str = "compatible"
+    llm_fallback_base_url: str = ""
+    llm_fallback_model: str = ""
     search_provider: str = "codex"
     imagegen_provider: str = "codex"
 
@@ -157,6 +159,8 @@ class Settings:
             app_host=app_host,
             app_port=app_port,
             llm_base_url=os.getenv("LLM_BASE_URL", "").strip().rstrip("/"),
+            llm_fallback_base_url=os.getenv("LLM_FALLBACK_BASE_URL", "").strip().rstrip("/"),
+            llm_fallback_model=os.getenv("LLM_FALLBACK_MODEL", "").strip(),
             llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             llm_provider=os.getenv("LLM_PROVIDER", "compatible").strip(),

@@ -30,6 +30,8 @@ def proxy_function(mode):
         "WebSocketDisconnect": type("WebSocketDisconnect", (Exception,), {}),
         "settings": SimpleNamespace(tts_mode=mode, avatar_ws_url="ws://synthetic.invalid"),
         "app": SimpleNamespace(state=SimpleNamespace(avatar_connected_clients=0)),
+        "parent_enrollment": SimpleNamespace(active=lambda: False),
+        "_parent_avatar_configured": lambda: False,
     }
     # Also lets the same regression exercise the old route before the fix exists.
     try:

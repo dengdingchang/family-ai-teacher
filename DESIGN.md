@@ -1,5 +1,21 @@
 # Family AI Teacher design system
 
+## 2026-09-26 visual direction
+
+The current child and parent surfaces use one original **family room** language:
+warm cream `#f6f3ed`, paper `#fffdf9`, forest action `#225b49`, ink
+`#20342f`, and a restrained peach child surface. The parent recording guide
+uses the same tokens so the first-use experience feels part of the product.
+
+The local VoltAgent `awesome-design-md` library informed two choices:
+`design-md/airbnb/DESIGN.md` for human photography, generous spacing, and
+friendly hit areas; `design-md/intercom/DESIGN.md` for clear editorial hierarchy
+and quiet utility surfaces. These are references, not copied brand assets,
+fonts, logos, or colors. Keep the existing Dad/media-first interaction and
+48px touch targets. On iPad, the camera toggle remains visible inside the
+child picture-in-picture frame. Never replace the real parent portrait with
+decorative illustration or fabricated mouth motion.
+
 ## Scene and direction
 
 A four-year-old sits at the family laptop in morning daylight, ready to tell Dad about a toy. The surface feels like a calm, familiar room: warm paper, Dad as the large primary view, a smaller child preview, and one easy microphone button. The parent visits the same room through a readable growth journal.

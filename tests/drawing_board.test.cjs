@@ -271,6 +271,44 @@ test("native fullscreen rejection keeps a usable overlay, and talk uses only the
   f.board.destroy();
 });
 
+test("touch drags cannot scroll away from the board, and touch devices stay in the overlay", async () => {
+  const f = boardFixture({ nativeFullscreen: true });
+  const overlay = f.doc.body.children[0];
+  let fullscreenRequests = 0, prevented = 0;
+  overlay.requestFullscreen = () => { fullscreenRequests++; return Promise.resolve(); };
+  f.doc.defaultView.navigator = { maxTouchPoints: 5 };
+  overlay.dispatch("touchmove", { cancelable: true, preventDefault() { prevented++; } });
+  f.board.open(); await tick();
+  try {
+    assert.equal(fullscreenRequests, 0, "touch devices use the fixed overlay");
+    overlay.dispatch("touchmove", { cancelable: true, preventDefault() { prevented++; } });
+    assert.equal(prevented, 1, "a downward drag cannot scroll the page behind the board");
+    f.canvas.dispatch("pointerdown", { pointerType: "touch", clientY: 300 });
+    f.canvas.dispatch("pointermove", { pointerType: "touch", clientY: 100 });
+    f.canvas.dispatch("pointerup", { pointerType: "touch" });
+    assert.equal(f.board.isOpen, true);
+    assert.ok(await f.board.getSnapshot(), "the stroke remains on the board");
+  } finally { f.board.destroy(); }
+  overlay.dispatch("touchmove", { cancelable: true, preventDefault() { prevented++; } });
+  assert.equal(prevented, 1, "normal page scrolling resumes after closing");
+});
+
+test("leaving native fullscreen preserves the fixed drawing overlay", async () => {
+  const f = boardFixture({ nativeFullscreen: true });
+  const overlay = f.doc.body.children[0];
+  overlay.requestFullscreen = () => { f.doc.fullscreenElement = overlay; return Promise.resolve(); };
+  f.doc.exitFullscreen = () => { f.doc.fullscreenElement = null; return Promise.resolve(); };
+  f.board.open(); await tick();
+  try {
+    f.canvas.dispatch("pointerdown"); f.canvas.dispatch("pointerup");
+    f.doc.fullscreenElement = null;
+    f.events.dispatch("fullscreenchange");
+    assert.equal(f.board.isOpen, true);
+    assert.equal(overlay.hidden, false);
+    assert.ok(await f.board.getSnapshot());
+  } finally { f.board.destroy(); }
+});
+
 test("small screens expand and fold brush tools without changing the drawing; desktop tools stay directly available", async () => {
   const f = boardFixture(); f.doc.viewportWidth = 320; f.board.open();
   const panel = f.made.find(node => node.className === "drawing-board__advanced-tools");

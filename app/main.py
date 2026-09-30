@@ -29,6 +29,8 @@ from pydantic import BaseModel, Field
 
 from avatar.control import StreamingAvatarControl
 from app.image_generation import CodexImageGenerationManager
+from app.parent_enrollment import ParentEnrollmentStore, EnrollmentError, decode_media, check_portrait, check_voice
+from app.parent_avatar import ParentAvatarBridge, ParentAvatarError
 from app.repetition import RepeatedQuestionGuard
 from app.model_settings import public_settings, candidate_settings, save_settings, ConfigurationConflict
 from app.media import TrustedMediaSearch, explicit_media_request, match_topic, normalize_image_subject, canonical_media_topic
@@ -56,6 +58,13 @@ memory = MemoryStore(
     learning_events_path=settings.learning_events_path,
     template_path=settings.project_root / "config" / "child_profile.example.json",
 )
+parent_enrollment = ParentEnrollmentStore(settings.data_dir)
+parent_avatar = ParentAvatarBridge(settings.data_dir, os.getenv("AI_STATION_SSH_HOST", "ai"))
+
+
+def _parent_avatar_configured() -> bool:
+    path = parent_enrollment.portrait_path()
+    return parent_avatar.configured_for(path.read_bytes() if path else None)
 def _cuda_stt_start_allowed() -> bool:
     if getattr(app.state, "tts_warmup", "not_started") != "ready":
         return False
@@ -225,6 +234,17 @@ class InteractionIntervalRequest(BaseModel):
     end_at: str = Field(min_length=1, max_length=64)
 
 
+class ActivityPlayRequest(BaseModel):
+    event_id: str = Field(min_length=36, max_length=36)
+    activity: Literal["chess", "drawing", "piano", "singing", "story", "game"]
+    kind: Literal["session", "stage", "challenge"]
+    step: str = Field(default="", max_length=80)
+    duration_seconds: int = Field(default=0, ge=0, le=3600)
+    level: str = Field(default="", max_length=20)
+    result: str = Field(default="", max_length=12)
+    independent: bool = False
+
+
 class ProfileUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=16)
     age: int | None = Field(default=None, ge=2, le=17)
@@ -367,7 +387,7 @@ def _messages_for(text: str, vision_context: str = "", chess_context: str = "") 
         recent = memory.get_recent_context()
         learning_events = [
             event
-            for event in memory.get_recent_learning_events(limit=12, exclude_types=("interaction_interval",))
+            for event in memory.get_recent_learning_events(limit=12, exclude_types=("interaction_interval", "activity_play", "activity_reward_redeemed"))
             if str(event.get("event_type", "")) != "conversation"
         ][-4:]
         profile = memory.get_child_profile()
@@ -475,6 +495,9 @@ def _tts_payload(result: Any, *, elapsed_key: str = "tts_elapsed_s") -> dict[str
 
 
 def _avatar_path() -> tuple[Path, str]:
+    parent_portrait = parent_enrollment.portrait_path()
+    if parent_portrait is not None:
+        return parent_portrait, "image/jpeg"
     configured = settings.avatar_image_path
     if configured and configured.is_file() and configured.suffix.lower() in {
         ".jpg",
@@ -487,6 +510,8 @@ def _avatar_path() -> tuple[Path, str]:
 
 
 def _avatar_idle_path() -> Path | None:
+    if parent_enrollment.active():
+        return None  # Nathan's idle video must never appear over a different parent.
     configured = settings.avatar_idle_path
     if configured and configured.suffix.lower() == ".mp4" and configured.is_file():
         return configured
@@ -1308,6 +1333,12 @@ def _continue_activity_reply(
 
     if activity == "english":
         word, meaning = _activity_english_word(subject)
+        already_tried = bool(not needs_help and not re.search(r"[?？]|吗|嗎|你", topic)
+            and re.search(r"(?:已经|已經|刚才|剛才|刚刚|剛剛).{0,8}(?:说|說|读|讀|念)(?:过|過|了|啦|呀)?|(?:说|說|读|讀|念)过了", topic))
+        if step == 5:
+            if said_word("blue", "蓝", "藍", "蓝色", "藍色"):
+                return finish("你找到了蓝色这个新词！今天试了两种颜色，想学别的词再告诉我。")
+            return finish("我们今天已经试过两个颜色了。谢谢你告诉我，想换个词时再一起玩。")
         if step == 3:
             sentence = f"I like {word.lower()}s"
             if said_word(sentence):
@@ -1320,10 +1351,14 @@ def _continue_activity_reply(
         if step == 1:
             if said_word(word, meaning, "蘋果" if meaning == "苹果" else meaning):
                 return advance(f"这次回答的是 {word}！红色叫 Red，你来试试？", 2)
+            if already_tried:
+                return advance("好，你已经试过这个词了。我们换一个：红色叫 Red。找找身边有没有红色？", 2)
             practice = "Ap-ple" if word == "Apple" else word
             return keep(f"没关系，我们慢慢说：{practice}。你再试一次好吗？")
         if said_word("red", "红", "紅", "红色", "紅色"):
             return finish(f"这次练习了 {word} 和 Red！去找找身边的红色，活动一下吧。")
+        if already_tried or (not needs_help and re.fullmatch(r"r[a-z]{0,3}[dt]", compact_answer)):
+            return advance("我听到你已经试过了，不重复跟读。换个小游戏：蓝色叫 Blue，找找蓝色在哪里？", 5)
         return keep("Red 就是红色。跟我说一次 Red，好吗？")
 
     if activity == "numbers":
@@ -2681,6 +2716,8 @@ async def health() -> dict[str, Any]:
         "tts_cache_entries": getattr(tts, "cache_entries", None),
         "avatar_configured": bool(settings.avatar_ws_url),
         "avatar_idle_ready": _avatar_idle_path() is not None,
+        "parent_identity_active": parent_enrollment.active(),
+        "parent_avatar_configured": _parent_avatar_configured(),
         "avatar_connected": getattr(app.state, "avatar_connected_clients", 0) > 0,
         "avatar_connected_clients": getattr(app.state, "avatar_connected_clients", 0),
         "avatar_audio_lead_ms": settings.avatar_audio_lead_ms,
@@ -3500,6 +3537,174 @@ async def parent_dashboard() -> dict[str, Any]:
     return dashboard
 
 
+@app.get("/api/activities/summary")
+async def activity_summary() -> dict[str, Any]:
+    return memory.get_activity_summary()
+
+
+@app.post("/api/activities/event")
+async def record_activity_play(request: ActivityPlayRequest) -> dict[str, Any]:
+    try:
+        recorded = await asyncio.to_thread(memory.record_activity_event, request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="这次活动进度暂未保存") from exc
+    return {"ok": True, "recorded": recorded,
+            "summary": memory.get_activity_summary() if request.kind == "challenge" else None}
+
+
+@app.post("/api/parent/rewards/{reward_id}/redeem")
+async def redeem_activity_reward(reward_id: str, request: Request) -> dict[str, Any]:
+    from urllib.parse import urlsplit
+    origin = urlsplit(request.headers.get("origin", ""))
+    hosts = {request.headers.get("host", "").lower()}
+    if request.client and request.client.host in {"127.0.0.1", "::1"}:
+        hosts.add(request.headers.get("x-forwarded-host", "").lower())
+    if request.headers.get("x-family-parent-action") != "redeem" or origin.scheme not in {"http", "https"} or origin.netloc.lower() not in hosts:
+        raise HTTPException(status_code=403, detail="请从家长空间确认兑换")
+    try:
+        redeemed = await asyncio.to_thread(memory.redeem_activity_reward, reward_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="没有找到这份礼物") from exc
+    return {"ok": True, "redeemed": redeemed}
+
+
+def _require_enrollment_request(request: Request) -> None:
+    # A custom header blocks ordinary cross-site forms; Origin rejects hostile JS.
+    from urllib.parse import urlsplit
+    if request.headers.get("x-family-enroll") != "1":
+        raise HTTPException(status_code=403, detail="请从家长录制引导页面操作")
+    origin = request.headers.get("origin", "").rstrip("/")
+    parsed = urlsplit(origin)
+    host = request.headers.get("host", "").lower()
+    forwarded = request.headers.get("x-forwarded-host", "").lower()
+    hosts = {host}
+    if request.client and request.client.host in {"127.0.0.1", "::1"} and forwarded:
+        hosts.add(forwarded)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.netloc.lower() not in hosts:
+        raise HTTPException(status_code=403, detail="录制只接受同源页面操作")
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        raise HTTPException(status_code=403, detail="不接受跨站录制请求")
+
+
+@app.get("/api/parent/enrollment")
+async def parent_enrollment_status() -> dict[str, Any]:
+    return {"active": parent_enrollment.active(),
+            "voice_supported": settings.tts_mode == "streaming"}
+
+
+@app.post("/api/parent/enrollment/preview")
+async def preview_parent_enrollment(request: Request) -> dict[str, Any]:
+    _require_enrollment_request(request)
+    if settings.tts_mode != "streaming" or not isinstance(tts, StreamingNathanTTSAdapter):
+        raise HTTPException(status_code=503, detail="当前声音运行模式还不能生成家长试听")
+    try:
+        claimed_size = int(request.headers.get("content-length", "0") or "0")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="录制内容格式不正确") from exc
+    if claimed_size > 4_000_000:
+        raise HTTPException(status_code=413, detail="录制内容过大，请重录")
+    raw = await request.body()
+    if len(raw) > 4_000_000:
+        raise HTTPException(status_code=413, detail="录制内容过大，请重录")
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise EnrollmentError("录制内容格式不正确")
+        if payload.get("consent") is not True:
+            raise EnrollmentError("请先确认这是你本人的声音和形象")
+        portrait = decode_media(payload.get("portrait", ""), limit=700_000)
+        wav = decode_media(payload.get("voice", ""), limit=2_200_000)
+        portrait, picture_quality = check_portrait(portrait)
+        voice_quality = check_voice(wav)
+        embedding, sample = await asyncio.to_thread(tts.prepare_parent_voice, wav)
+        token = parent_enrollment.stage(portrait, embedding)
+    except (EnrollmentError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TTSAdapterError as exc:
+        raise HTTPException(status_code=503, detail="声音试听暂时无法生成，请稍后重试") from exc
+    return {"token": token, "preview_audio": base64.b64encode(sample).decode("ascii"),
+            "quality": {"picture": picture_quality, "voice": voice_quality}}
+
+
+@app.post("/api/parent/enrollment/activate")
+async def activate_parent_enrollment(request: Request) -> dict[str, Any]:
+    _require_enrollment_request(request)
+    payload = await request.json()
+    try:
+        token = str(payload.get("token", ""))
+        portrait, embedding = parent_enrollment.peek(token)
+    except EnrollmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    prior_path = parent_enrollment.voice_path()
+    prior_voice = prior_path.read_bytes() if prior_path else None
+    prior_portrait_path = parent_enrollment.portrait_path()
+    prior_portrait = prior_portrait_path.read_bytes() if prior_portrait_path else None
+    remote_changed = False
+    try:
+        await asyncio.to_thread(tts.activate_parent_voice, embedding)
+        remote_changed = True
+        await asyncio.to_thread(parent_avatar.activate, portrait)
+        parent_enrollment.commit(portrait, embedding)
+        parent_enrollment.discard(token)
+    except (OSError, EnrollmentError, TTSAdapterError, ParentAvatarError) as exc:
+        if remote_changed:
+            try:
+                if prior_portrait:
+                    await asyncio.to_thread(parent_avatar.activate, prior_portrait)
+                else:
+                    await asyncio.to_thread(parent_avatar.restore)
+            except ParentAvatarError:
+                logger.warning("Parent avatar rollback needs attention")
+        try:
+            if prior_voice:
+                await asyncio.to_thread(tts.activate_parent_voice, prior_voice)
+            else:
+                await asyncio.to_thread(tts.restore_nathan_voice)
+        except TTSAdapterError:
+            logger.warning("Parent enrollment voice rollback needs attention")
+        try:
+            if prior_portrait and prior_voice:
+                parent_enrollment.commit(prior_portrait, prior_voice)
+            else:
+                parent_enrollment.clear(preserve_draft=True)
+        except (OSError, EnrollmentError):
+            logger.warning("Parent enrollment file rollback needs attention")
+        raise HTTPException(status_code=503, detail="启用暂未完成，可再次点击确认重试；原有老师保持可用") from exc
+    return {"active": True, "avatar_configured": True}
+
+
+@app.delete("/api/parent/enrollment")
+async def delete_parent_enrollment(request: Request) -> dict[str, Any]:
+    _require_enrollment_request(request)
+    payload = await request.json()
+    expected = _child_nickname(memory.get_child_profile()) or "DELETE"
+    if payload.get("confirmation") != expected:
+        raise HTTPException(status_code=400, detail="确认文字与孩子昵称不一致")
+    prior_path = parent_enrollment.portrait_path()
+    prior_portrait = prior_path.read_bytes() if prior_path else None
+    prior_voice_path = parent_enrollment.voice_path()
+    prior_voice = prior_voice_path.read_bytes() if prior_voice_path else None
+    try:
+        await asyncio.to_thread(parent_avatar.restore)
+        await asyncio.to_thread(tts.restore_nathan_voice)
+        parent_enrollment.clear()
+    except (OSError, TTSAdapterError, ParentAvatarError) as exc:
+        if prior_portrait:
+            try:
+                await asyncio.to_thread(parent_avatar.activate, prior_portrait)
+            except ParentAvatarError:
+                logger.warning("Parent avatar deletion rollback needs attention")
+        if prior_voice:
+            try:
+                await asyncio.to_thread(tts.activate_parent_voice, prior_voice)
+            except TTSAdapterError:
+                logger.warning("Parent voice deletion rollback needs attention")
+        raise HTTPException(status_code=503, detail="删除没有完成，请稍后重试") from exc
+    return {"active": False}
+
+
 @app.get("/api/parent/export")
 async def parent_export() -> dict[str, Any]:
     return memory.export_bundle()
@@ -3525,6 +3730,11 @@ async def parent_page() -> FileResponse:
     return FileResponse(settings.frontend_dir / "parent.html", media_type="text/html")
 
 
+@app.get("/setup")
+async def setup_page() -> FileResponse:
+    return FileResponse(settings.frontend_dir / "setup.html", media_type="text/html")
+
+
 @app.get("/api/avatar")
 async def avatar() -> FileResponse:
     path, media_type = _avatar_path()
@@ -3547,6 +3757,10 @@ async def avatar_websocket(websocket: WebSocket) -> None:
     """Same-origin proxy to the loopback-only SoulX WebSocket tunnel."""
 
     await websocket.accept()
+    if parent_enrollment.active() and not _parent_avatar_configured():
+        await websocket.send_json({"type": "error", "message": "personal avatar motion is not ready"})
+        await websocket.close(code=1013)
+        return
     upstream_connected = False
     # Only browser-fed PCM has the same control and viewing connection. Legacy
     # remote TTS cues use a separate connection and retain the original proxy.

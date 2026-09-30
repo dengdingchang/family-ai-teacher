@@ -39,6 +39,7 @@ function fixture() {
     chessBoard: null, drawingBoard: null, inputSampleRate: 48000,
     recordButton: element(), recordLabel: element(), recordHint: element(), playChoices: element(), playButton: element(),
     activityEnabled: () => true, stopVadLoop() {}, stopBargeInMonitor() {}, resetListeningLevel() {},
+    beginPlayActivity() {}, endPlayActivity() {},
     clearResponseQueue() {}, cancelPlayback() {}, setStatus() {}, setBusy() {}, cancelChessExplanation() {},
     cancelMediaSuggestionLookup() {}, cancelConversationTurn() {},
     interruptActiveReply: async () => {}, acquireMusicMicrophone() {}, transcribeMusicRecording() {},

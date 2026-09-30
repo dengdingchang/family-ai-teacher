@@ -47,6 +47,23 @@ test("piano uses browser audio, keyboard/touch notes, and separates order from r
   } finally { f.studio.destroy(); }
 });
 
+test("parent activity receipts follow the actual music stage without treating practice as mastery", async () => {
+  const progress = [], f = await fixture({ onProgress: event => progress.push(event) });
+  f.studio.open();
+  try {
+    f.studio.setMode("piano");
+    assert.match(progress.at(-1).step, /第 1 关/);
+    f.studio.playChildNote({ id: "C4", label: "哆", frequency: 261.63 });
+    f.studio.playChildNote({ id: "D4", label: "来", frequency: 293.66 });
+    f.studio.playChildNote({ id: "E4", label: "咪", frequency: 329.63 });
+    assert.match(progress.at(-1).step, /完成/);
+    f.studio.nextLesson();
+    assert.match(progress.at(-1).step, /第 2 关/);
+    f.studio.setMode("sing");
+    assert.equal(progress.at(-1).activity, "singing");
+  } finally { f.studio.destroy(); }
+});
+
 test("demo narrates a truthful singing boundary then highlights and plays three reference notes", async () => {
   const spoken = []; const f = await fixture({ onSpeak: async text => { spoken.push(text); return { ok: true }; } }); f.studio.open(); f.studio.setMode("sing");
   try { await f.studio.demo(); f.runTimers(); assert.match(spoken[0], /不能唱歌/); assert.equal(f.audio.played.length, 3); assert.match(f.studio.feedback.textContent, /参考音/); }
