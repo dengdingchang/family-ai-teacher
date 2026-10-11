@@ -2,7 +2,7 @@
 
 - Start each continuation from `docs/current-stage.md` and `docs/2026-09-06_handoff.md`; keep the former as the current execution matrix and the latter as the cross-device handoff.
 
-- Keep this project a single local Windows application.
+- Deployment authority (2026-10-11): the owner authorizes AI Station as the independent application and family-data host; Windows remains a retained rollback deployment. Keep a single writable primary. Do not resume the Windows application before syncing new primary data back.
 - Read and reuse the existing Nathan TTS runtime; do not install another voice model without explicit approval.
 - Keep LLM, Vision, and future Memory services behind interfaces. Do not move models to this laptop.
 - Do not persist raw microphone audio, raw camera video, or automatically upload camera frames.

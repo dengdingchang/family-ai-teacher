@@ -1,0 +1,7 @@
+[Unit]
+Description=Private verified teacher backup
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/home/selfhost/family-ai-teacher/runtime/teacher-app/bin/python /home/selfhost/family-ai-teacher/app-live/scripts/backup_station.py --root /home/selfhost/family-ai-teacher/app-live --destination /home/selfhost/family-ai-teacher/backups/independent

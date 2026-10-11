@@ -1,5 +1,9 @@
 # AI Station deployment and OOM guardrail
 
+## 2026-10-11 current deployment
+
+AI Station now owns the independent teacher application, family data, authenticated gateway and dedicated tunnel. Use the `family-teacher-*` units and [migration/rollback runbook](../../docs/2026-10-11_self-host-independent.md). The archived old gateway stays unused; shared ingress stays untouched. The dated Windows-only route below is historical. `install-services.sh` installs units without switching connectors. Never restore Windows without carrying back newly written Station data.
+
 ## 2026-09-26 parent avatar and public route
 
 AI Station no longer serves the `teacher.example.com` public route. Its shared Cloudflare ingress has no teacher entry; the former `family-ai-teacher-gateway.service` and its drop-in are archived under their dated `.archived-20260926` names. Windows owns the dedicated public Cloudflare Tunnel and loopback login gateway described in the project README. Do not restart the archived gateway or add a second teacher ingress here.

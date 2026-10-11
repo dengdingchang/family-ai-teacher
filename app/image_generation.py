@@ -66,7 +66,7 @@ def _minimal_codex_environment() -> dict[str, str]:
     names = {
         "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "USERPROFILE",
         "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
-        "CODEX_HOME", "USERNAME", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+        "CODEX_HOME", "HOME", "USER", "LANG", "USERNAME", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
     }
     result = {name: value for name, value in os.environ.items() if name.upper() in names}
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"):

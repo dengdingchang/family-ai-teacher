@@ -9,7 +9,19 @@ $url = "http://127.0.0.1:$port/"
 # expire during a real recovery even though the service later became healthy.
 $deadline = (Get-Date).AddMinutes(15)
 $ready = $false
-while ((Get-Date) -lt $deadline) {
+$remoteUrl = $env:TEACHER_CLIENT_URL
+$envFile = Join-Path (Split-Path -Parent $PSScriptRoot) '.env'
+if (-not $remoteUrl -and (Test-Path -LiteralPath $envFile)) {
+    foreach ($line in [IO.File]::ReadAllLines($envFile)) {
+        if ($line -match '^TEACHER_CLIENT_URL=(.*)$') { $remoteUrl = $Matches[1].Trim().Trim('"').Trim("'") }
+    }
+}
+if ($remoteUrl) {
+    if ($remoteUrl.TrimEnd('/') -ne 'https://teacher.example.com') { throw 'Teacher client URL must use the approved HTTPS entry' }
+    $url = 'https://teacher.example.com/'
+    $ready = $true
+}
+while (-not $ready -and (Get-Date) -lt $deadline) {
     try {
         $health = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/health" -f $port) -TimeoutSec 3
         if ($health.status -eq 'ok' -and $health.app -eq 'family-ai-teacher') {

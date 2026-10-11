@@ -8,6 +8,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import os
 from pathlib import Path
 import queue
 import sys
@@ -22,7 +23,7 @@ def emit(payload: dict) -> None:
 def _prepare_cuda(directory):
     # The existing embedded Python has an isolated ._pth; sibling imports are
     # not guaranteed. Load only this production helper by its absolute path.
-    spec = importlib.util.spec_from_file_location("stt_cuda_runtime", Path(__file__).with_name("cuda_runtime.py"))
+    spec = importlib.util.spec_from_file_location("stt_cuda_runtime", Path(__file__).with_name("cuda_runtime.py" if os.name == "nt" else "cuda_linux.py"))
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
     return helper.prepare_cuda(directory)

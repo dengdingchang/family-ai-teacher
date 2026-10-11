@@ -1,0 +1,15 @@
+[Unit]
+Description=Family Teacher authenticated loopback gateway
+After=family-teacher-app.service
+
+[Service]
+WorkingDirectory=/home/selfhost/family-ai-teacher/app-live
+EnvironmentFile=/home/selfhost/family-ai-teacher/app-live/.env
+Environment=TEACHER_UPSTREAM=http://127.0.0.1:18760
+ExecStart=/home/selfhost/family-ai-teacher/runtime/teacher-app/bin/python -m uvicorn app.public_gateway:app --host 127.0.0.1 --port 18769 --no-access-log --no-proxy-headers
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

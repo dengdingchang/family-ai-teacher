@@ -20,6 +20,17 @@ def emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=True), flush=True)
 
 
+def gpu_memory_fraction(free: int, total: int) -> float:
+    budget_mib = int(os.getenv("TTS_STREAMING_GPU_BUDGET_MIB", "0"))
+    if budget_mib and not 6600 <= budget_mib <= 12288:
+        raise RuntimeError("Streaming GPU budget must be between 6600 and 12288 MiB")
+    if (not budget_mib and total > 12 * 2**30) or free < max(6600, budget_mib) * 2**20:
+        raise RuntimeError("Insufficient idle local GPU capacity for streaming voice")
+    if budget_mib * 2**20 > total:
+        raise RuntimeError("Streaming GPU budget exceeds device capacity")
+    return budget_mib * 2**20 / total if budget_mib else 0.70
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
@@ -42,9 +53,7 @@ def main() -> int:
         free, total = torch.cuda.mem_get_info(0)
         # Leave capacity for the browser. This is an allocator guard, not a
         # device-wide memory quota; never evict another model to make room.
-        if total > 12 * 2**30 or free < 6600 * 2**20:
-            raise RuntimeError("Insufficient idle local GPU capacity for streaming voice")
-        torch.cuda.set_per_process_memory_fraction(0.70, 0)
+        torch.cuda.set_per_process_memory_fraction(gpu_memory_fraction(free, total), 0)
         torch.set_num_threads(4)
         model = FasterQwen3TTS.from_pretrained(
             str(Path(args.model).resolve()), device="cuda:0", dtype=torch.float16,

@@ -100,8 +100,13 @@ def test_daemon_sibling_import_does_not_require_project_on_sys_path(monkeypatch)
     # An empty directory is rejected before importing CTranslate2 or querying
     # hardware, while exercising the real absolute-file module loader.
     monkeypatch.setattr(sys, "path", [item for item in sys.path if "family-ai-teacher" not in item.lower()])
-    with pytest.raises(RuntimeError, match="cuda_dependencies_invalid"):
+    if daemon.os.name != "nt":
+        def unavailable(*args, **kwargs):
+            raise OSError("synthetic missing CUDA runtime")
+        monkeypatch.setattr(cuda.subprocess, "check_output", unavailable)
+    with pytest.raises(RuntimeError) as caught:
         daemon._prepare_cuda("")
+    assert caught.value.reason == "cuda_dependencies_invalid"
 
 
 @pytest.mark.parametrize("error,retry", [

@@ -45,7 +45,7 @@ from tts.persistent import PersistentNathanTTSAdapter
 from tts.remote import FallbackNathanTTSAdapter, RemoteNathanTTSAdapter
 from tts.streaming import StreamingNathanTTSAdapter
 
-from .config import Settings
+from .config import Settings, require_primary_deployment
 from .story import choose_topic, planned_reply, narration_messages, clean_narration
 
 
@@ -178,6 +178,7 @@ async def _warm_up_tts_with_recovery() -> None:
 
 @app.on_event("startup")
 async def startup_tts_warmup() -> None:
+    require_primary_deployment()
     app.state.tts_warmup_task = asyncio.create_task(_warm_up_tts_with_recovery())
     async def prepare_recognition() -> None:
         try:
@@ -2753,7 +2754,13 @@ def _require_local_settings_request(request: Request) -> None:
     if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise HTTPException(status_code=403, detail="请从本机爸爸老师打开设置")
     origin = request.headers.get("origin")
-    if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+    allowed_origins = {str(request.base_url).rstrip("/")}
+    if request.client and request.client.host in {"127.0.0.1", "::1"}:
+        forwarded_host = request.headers.get("x-forwarded-host", "")
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        if forwarded_host and forwarded_proto in {"http", "https"}:
+            allowed_origins.add(f"{forwarded_proto}://{forwarded_host}")
+    if origin and origin.rstrip("/") not in allowed_origins:
         raise HTTPException(status_code=403, detail="设置只接受本机同源页面操作")
     if request.headers.get("sec-fetch-site") == "cross-site":
         raise HTTPException(status_code=403, detail="不接受跨站设置请求")

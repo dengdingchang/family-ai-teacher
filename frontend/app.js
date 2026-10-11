@@ -1831,9 +1831,23 @@ function releaseInputStream() {
   recordingStream = null;
 }
 
+function microphoneErrorMessage(error) {
+  if (window.isSecureContext === false) return "请用 https://teacher.example.com 打开爸爸老师，再点说话。";
+  if (["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(error?.name)) {
+    return "麦克风权限未开启。请在浏览器的网站设置中允许麦克风，再点说话；iPad 也请检查系统设置中的浏览器麦克风权限。";
+  }
+  if (["NotFoundError", "DevicesNotFoundError"].includes(error?.name)) return "没有找到麦克风，请连接或开启麦克风后重试。";
+  if (["NotReadableError", "TrackStartError", "AbortError"].includes(error?.name)) return "麦克风暂时无法使用，请关闭其他录音应用后重试。";
+  return error?.message || "麦克风没有打开，请稍后再试。";
+}
+
 async function startContinuousConversation({ shouldContinue = () => !pageIsLeaving } = {}) {
-  if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext && !window.webkitAudioContext) {
-    throw new Error("当前浏览器不支持录音，请使用最新版 Chrome。");
+  if (window.isSecureContext === false) throw new Error(microphoneErrorMessage());
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("这个浏览器没有提供麦克风功能，请用系统浏览器或更新后的 Safari、Chrome 打开 HTTPS 入口。");
+  }
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    throw new Error("这个浏览器没有提供语音播放功能，请更新 Safari 或 Chrome 后重试。");
   }
   if (conversationStarting || conversationActive) return;
   conversationStarting = true;
@@ -1886,7 +1900,7 @@ async function startContinuousConversation({ shouldContinue = () => !pageIsLeavi
   } catch (error) {
     conversationActive = false;
     releaseInputStream();
-    throw error;
+    throw new Error(microphoneErrorMessage(error));
   } finally {
     conversationStarting = false;
     recordButton.disabled = false;

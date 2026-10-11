@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import os
+import time
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import parse_qs, urlsplit
 
@@ -15,6 +16,7 @@ from starlette.background import BackgroundTask
 from websockets.asyncio.client import connect as websocket_connect
 
 from app import public_auth as studio_auth
+from app.config import require_primary_deployment
 
 
 UPSTREAM = os.environ.get("TEACHER_UPSTREAM", "http://127.0.0.1:8760").rstrip("/")
@@ -29,6 +31,7 @@ SAFE_HOSTS = {PUBLIC_HOST, "127.0.0.1", "localhost"}
 HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "transfer-encoding", "upgrade", "host", "cookie",
+    "forwarded", "x-forwarded-for", "x-real-ip", "x-forwarded-host", "x-forwarded-proto",
 }
 
 
@@ -74,6 +77,7 @@ button:hover{{background:#174637}}.error{{color:#9c2c2c;background:#fff0ef;paddi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    require_primary_deployment()
     studio_auth.ensure_seeded()
     app.state.client = httpx.AsyncClient(base_url=UPSTREAM, timeout=None, trust_env=False)
     yield
@@ -83,11 +87,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+def _is_https(request: Request) -> bool:
+    # Only the loopback tunnel proxy may supply the original protocol.
+    peer = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-proto", "").strip().lower()
+    return request.url.scheme in {"https", "wss"} or (peer in {"127.0.0.1", "::1"} and forwarded == "https")
+
+
 @app.middleware("http")
 async def secure_gateway(request: Request, call_next):
     host = request.headers.get("host", "").split(":", 1)[0].lower()
     if host not in SAFE_HOSTS:
         return JSONResponse({"detail": "访问地址无效"}, status_code=400)
+    started = time.perf_counter()
+    if host == PUBLIC_HOST and not _is_https(request):
+        # Fixed authority prevents Host/path-based open redirects.
+        target = f"https://{PUBLIC_HOST}{request.url.path}"
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(target, status_code=308)
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         origin = request.headers.get("origin")
         if origin and urlsplit(origin).netloc != request.headers.get("host"):
@@ -99,13 +117,16 @@ async def secure_gateway(request: Request, call_next):
             return JSONResponse({"detail": "请先登录"}, status_code=401)
         return RedirectResponse("/login", status_code=302)
     response = await call_next(request)
+    response.headers["Server-Timing"] = f"gateway;dur={(time.perf_counter() - started) * 1000:.1f}"
+    if host == PUBLIC_HOST:
+        response.headers["Strict-Transport-Security"] = "max-age=86400"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self)"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; "
+        "default-src 'self'; img-src 'self' blob: data: https://upload.wikimedia.org https://i.ytimg.com; media-src 'self' blob:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; "
-        "frame-ancestors 'none'"
+        "frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'"
     )
     return response
 
@@ -142,8 +163,7 @@ async def login(request: Request):
     except (httpx.HTTPError, ValueError, TypeError):
         enrolled = False
     response = RedirectResponse("/" if enrolled else "/setup", status_code=303)
-    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
-    secure = request.url.scheme == "https" or forwarded == "https"
+    secure = request.headers.get("host", "").split(":", 1)[0].lower() == PUBLIC_HOST or _is_https(request)
     response.set_cookie(
         studio_auth.COOKIE, token, httponly=True, samesite="lax", secure=secure,
         max_age=studio_auth.SESSION_DAYS * 86400, path="/",
@@ -164,7 +184,8 @@ async def websocket_proxy(websocket: WebSocket, path: str):
     host_header = websocket.headers.get("host", "")
     host = host_header.split(":", 1)[0].lower()
     origin = websocket.headers.get("origin")
-    if host not in SAFE_HOSTS or (origin and urlsplit(origin).netloc != host_header):
+    if (host not in SAFE_HOSTS or (host == PUBLIC_HOST and not _is_https(websocket))
+            or (origin and urlsplit(origin).netloc != host_header)):
         await websocket.close(code=4403)
         return
     if not _profile(websocket.cookies.get(studio_auth.COOKIE)):
@@ -210,7 +231,7 @@ async def proxy(request: Request, path: str):
     query = f"?{request.url.query}" if request.url.query else ""
     headers = {key: value for key, value in request.headers.items() if key.lower() not in HOP_HEADERS}
     headers["x-forwarded-host"] = request.headers.get("host", PUBLIC_HOST)
-    headers["x-forwarded-proto"] = (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",", 1)[0]
+    headers["x-forwarded-proto"] = "https" if _is_https(request) else "http"
     upstream_request = request.app.state.client.build_request(
         request.method, f"/{path}{query}", headers=headers, content=await request.body(),
     )

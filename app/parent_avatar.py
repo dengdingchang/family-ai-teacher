@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -22,6 +23,8 @@ class ParentAvatarBridge:
     def _remote(self, action: str, image: bytes | None = None) -> None:
         command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", self.host,
                    "python3", "/home/selfhost/family-ai-teacher/services/parent_avatar.py", action]
+        if os.getenv("PARENT_AVATAR_TRANSPORT", "ssh") == "local":
+            command = [sys.executable, os.environ["PARENT_AVATAR_SCRIPT"], action]
         for attempt in range(2):
             try:
                 result = subprocess.run(command, input=image, capture_output=True, timeout=50)

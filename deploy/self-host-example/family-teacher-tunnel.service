@@ -1,0 +1,12 @@
+[Unit]
+Description=Dedicated teacher HTTPS tunnel (single active connector host)
+After=network-online.target family-teacher-gateway.service
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared --config /home/selfhost/.cloudflared/family-teacher-independent.yml tunnel run
+Restart=always
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -34,6 +34,11 @@ def load_dotenv(path: Path) -> None:
         os.environ[key] = value
 
 
+def require_primary_deployment() -> None:
+    if os.getenv("DEPLOYMENT_ROLE", "primary").strip().lower() != "primary":
+        raise RuntimeError("This deployment is standby. Sync current primary data before restoring service.")
+
+
 def _path_env(name: str, default: str) -> Path:
     return Path(os.getenv(name, default)).expanduser()
 

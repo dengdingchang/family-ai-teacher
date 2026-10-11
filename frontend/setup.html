@@ -29,8 +29,8 @@
               <li><span>◯</span>让脸和肩膀处于取景框中间</li>
               <li><span>♫</span>找安静的地方，按正常语速说话</li>
             </ul>
-            <label class="consent"><input id="consent" type="checkbox" /><span>我确认录制的是我本人的形象和声音。同意把本次声音临时发送到 Windows 爸爸老师服务生成声音特征；原始音频不会保存，视频原片留在此页面。在我试听并确认启用后，一张处理后的头像帧会发送给 AI Station 的数字人模型。我可以随时删除。</span></label>
-            <p class="route-note">使用公网地址时，录制声音会经 Cloudflare 转发到 Windows；家庭私网 HTTPS 地址不经过公网入口。</p>
+            <label class="consent"><input id="consent" type="checkbox" /><span>我确认录制的是我本人的形象和声音。同意把本次声音临时发送到 家庭专用的爸爸老师服务（当前部署在 AI Station）生成声音特征；原始音频不会保存，视频原片留在此页面。在我试听并确认启用后，一张处理后的头像帧会发送给 AI Station 的数字人模型。我可以随时删除。</span></label>
+            <p class="route-note">使用公网地址时，录制声音会经 Cloudflare 转发到家庭专用服务；家庭私网 HTTPS 地址不经过公网入口。</p>
             <button id="openCamera" class="main-button" type="button">打开摄像头和麦克风</button>
             <p class="skip-note"><a href="/">先使用原有爸爸老师</a></p>
           </div>
@@ -63,7 +63,7 @@
             <div class="face-guide" aria-hidden="true"></div>
             <span id="recordTimer" class="record-timer" hidden>录制中 · 10</span>
           </div>
-          <p class="capture-caption">视频原片只留在当前页面。声音录制临时传给 Windows 处理，不落盘；确认后 Windows 保存头像帧和声音特征，AI Station 保存用于动态画面的一张头像帧。</p>
+          <p class="capture-caption">视频原片只留在当前页面。声音录制临时传给家庭专用服务处理，不落盘；确认后家庭专用服务保存头像帧和声音特征，AI Station 的数字人使用这张头像帧。</p>
           <section class="current-identity"><span id="identityState">正在读取当前形象…</span><button id="deleteIdentity" type="button" hidden>删除我的形象与声音</button></section>
         </aside>
       </div>

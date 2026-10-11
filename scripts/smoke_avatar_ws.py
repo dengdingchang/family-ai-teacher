@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Feed an in-memory 16 kHz test tone after ready (never persisted).",
     )
+    parser.add_argument("--streaming-controls", action="store_true", help="Send audio directly to acquire the streaming renderer; do not wait for an unowned flush.")
     return parser.parse_args()
 
 
@@ -65,6 +66,7 @@ async def run(
     frame_target: int,
     timeout: float,
     feed_tone_seconds: float = 0.0,
+    streaming_controls: bool = False,
 ) -> dict[str, object]:
     started = time.perf_counter()
     packet_times: list[float] = []
@@ -85,6 +87,12 @@ async def run(
                 payload = json.loads(message)
                 if payload.get("type") == "ready":
                     ready = payload
+                    if streaming_controls and feed_tone_seconds > 0 and not feed_sent:
+                        await socket.send(json.dumps({"type": "audio_begin"}))
+                        await socket.send(json.dumps({"type": "audio", "pcm": base64.b64encode(tone_pcm(feed_tone_seconds)).decode("ascii")}))
+                        await socket.send(json.dumps({"type": "audio_end"}))
+                        feed_sent = True
+                        feed_sent_at = time.perf_counter()
                     if feed_tone_seconds > 0 and not feed_sent:
                         await socket.send(json.dumps({"type": "flush"}))
                         flush_requested = True
@@ -149,6 +157,7 @@ def main() -> int:
             max(2, args.frames),
             args.timeout,
             max(0.0, args.feed_tone_seconds),
+            args.streaming_controls,
         )
     )
     print(json.dumps(result, ensure_ascii=False))

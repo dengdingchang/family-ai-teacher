@@ -353,7 +353,7 @@ def test_codex_subprocess_environment_does_not_inherit_application_keys(monkeypa
     assert "LLM_API_KEY" not in environment
     assert "OPENAI_API_KEY" not in environment
     assert "TTS_REF_TEXT" not in environment
-    assert environment.get("USERPROFILE")
+    assert environment.get("USERPROFILE" if os.name == "nt" else "HOME")
 
 
 def test_safe_file_rejects_truncated_png_and_reparse_target(tmp_path: Path) -> None:
