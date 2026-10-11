@@ -4,6 +4,14 @@
 
 AI Station now owns the independent teacher application, family data, authenticated gateway and dedicated tunnel. Use the `family-teacher-*` units and [migration/rollback runbook](../../docs/2026-10-11_self-host-independent.md). The archived old gateway stays unused; shared ingress stays untouched. The dated Windows-only route below is historical. `install-services.sh` installs units without switching connectors. Never restore Windows without carrying back newly written Station data.
 
+## 2026-10-11 Maintenance ownership and release flow
+
+The directory move is approved but has not run. Until the move is verified, the container root is /home/selfhost/family-ai-teacher, its repository child is the maintenance checkout, and app-live remains the production source. After verified relocation, the only daily Git checkout is /home/selfhost/workspaces/Personal Project/family-ai-teacher/repository; the separate app-live copy remains the serving runtime, app-test remains the retained old copy, and the old root stays as a compatibility link.
+
+For each code change, the project chat edits and validates only the maintenance checkout, reviews and commits the exact revision, then pushes GitHub if requested. A GitHub push is a backup and does not publish to app-live. The project chat publishes the reviewed revision by synchronizing only its tracked runtime source files to app-live, preserving its .env, family data, runtime, mounted models, caches, private media, backups, app-test, and unknown files. It then reads back the changed files, checks the application health and gateway login entry, and restarts only the service units that use changed runtime code. Documentation or test-only changes do not require a service restart.
+
+There is currently no safe application-source publishing script. install-services.sh only installs the reviewed systemd unit templates and reloads the user manager; it does not publish application source. Project chat performs the bounded source sync and checks for each authorized release, so the user does not manually copy files. This maintenance flow adds no update daemon, CI job, or generic release tool.
+
 ## 2026-09-26 parent avatar and public route
 
 AI Station no longer serves the `teacher.example.com` public route. Its shared Cloudflare ingress has no teacher entry; the former `family-ai-teacher-gateway.service` and its drop-in are archived under their dated `.archived-20260926` names. Windows owns the dedicated public Cloudflare Tunnel and loopback login gateway described in the project README. Do not restart the archived gateway or add a second teacher ingress here.
