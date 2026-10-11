@@ -4,11 +4,11 @@ After=vllm-qwen38-27b-nvfp4.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/selfhost/family-ai-teacher/sources/SoulX-FlashHead
+WorkingDirectory=/home/selfhost/workspaces/Personal Project/family-ai-teacher/sources/SoulX-FlashHead
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-Environment=SOULX_ROOT=/home/selfhost/family-ai-teacher/sources/SoulX-FlashHead
-Environment=SOULX_SERVER_PATH=/home/selfhost/family-ai-teacher/sources/VoxEMW/voxemw/avatar/soulx_server.py
+Environment="SOULX_ROOT=/home/selfhost/workspaces/Personal Project/family-ai-teacher/sources/SoulX-FlashHead"
+Environment="SOULX_SERVER_PATH=/home/selfhost/workspaces/Personal Project/family-ai-teacher/sources/VoxEMW/voxemw/avatar/soulx_server.py"
 Environment=SOULX_GPU_MEMORY_FRACTION=0.07
 Environment=SOULX_MIN_FREE_MIB=17000
 Environment=SOULX_WIRE_CODEC=h264
@@ -16,7 +16,7 @@ Environment=SOULX_IDLE_MODE=speech_only
 Environment=SOULX_H264_BITRATE=192000
 Environment=SOULX_H264_BATCH_FRAMES=3
 Environment=VLLM_HEALTH_URL=http://127.0.0.1:8002/health
-ExecStart=/home/selfhost/family-ai-teacher/runtime/flashhead/.venv/bin/python /home/selfhost/family-ai-teacher/services/remote_soulx_runner.py --cond-image /home/selfhost/family-ai-teacher/assets/nathan/nathan-soulx-ref.png --ckpt /media/selfhost/ssd4t-data1/family-ai-teacher/models/SoulX-FlashHead-1_3B --wav2vec /media/selfhost/ssd4t-data1/family-ai-teacher/models/wav2vec2-base-960h --host 127.0.0.1 --port 8791
+ExecStart="/home/selfhost/workspaces/Personal Project/family-ai-teacher/runtime/flashhead/.venv/bin/python" "/home/selfhost/workspaces/Personal Project/family-ai-teacher/services/remote_soulx_runner.py" --cond-image "/home/selfhost/workspaces/Personal Project/family-ai-teacher/assets/nathan/nathan-soulx-ref.png" --ckpt /media/selfhost/ssd4t-data1/family-ai-teacher/models/SoulX-FlashHead-1_3B --wav2vec /media/selfhost/ssd4t-data1/family-ai-teacher/models/wav2vec2-base-960h --host 127.0.0.1 --port 8791
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=180

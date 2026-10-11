@@ -6,7 +6,13 @@ AI Station now owns the independent teacher application, family data, authentica
 
 ## 2026-10-11 Maintenance ownership and release flow
 
-The directory move is verified. The only daily Git checkout is `/home/selfhost/workspaces/Personal Project/family-ai-teacher/repository`; `app-live` in the same container remains the serving source, `app-test` remains the retained old copy, and `/home/selfhost/family-ai-teacher` is a compatibility symlink to the new project root.
+The directory and service path cutover are verified. The only daily Git checkout is `/home/selfhost/workspaces/Personal Project/family-ai-teacher/repository`; `app-live` remains the serving copy and `app-test` is retained. The old `/home/selfhost/family-ai-teacher` compatibility symlink has been removed. app/gateway/TTS/SoulX were restarted with the new root; their active commands and paths, plus backup ExecStart, use it. CE bridge, shared vLLM and the family tunnel were not restarted. SSD models remain at `/media/selfhost/ssd4t-data1/family-ai-teacher/models`.
+
+The coordinator verified health 200 with STT/TTS, TTS warmup and avatar idle ready, local login 200 and unauthenticated public entry 302 from Mac. Stream/cancel and SoulX H264 smoke checks passed without new history records or saved raw media. The first attempt was restored after teacher-streaming's `existing-runtime.pth` still pointed at the old TTS packages; changing only that path allowed the second cold start to pass. Check active pth/egg-link/editable references and actual sys.path in all four venvs, including teacher-streaming. Pass paths containing spaces as complete arguments; console entries use the standard shell header.
+
+Private recovery evidence is under `runtime/governance/service-path-cutover/20261011T115512Z/`: `cutover-receipt-2.json` records PASS and old_link_removed=true; the first failed/restored receipt is preserved. `manifest.json` and `originals/` retain 127 original files; `installed-units/` retains original units. Recovery uses those originals and units, restores the compatibility symlink, then follows the original service startup order. The older relocate script/receipt describe the historical move with old HEAD/PIDs/link state and must not be used directly for current verify/rollback.
+
+Protected data inode/mode, external models, GPU schedule and shared LLM policy were unchanged; six .env path updates were expected. Scheduling remains disabled. iPad hardware, a full host reboot and concurrent full-load use remain unverified. Inactive local-mode SSH fallback, old app-live deployment templates and historical logs/caches/backups may still contain old path strings; the active production chain no longer depends on the old entry.
 
 For each code change, the project chat edits and validates only the maintenance checkout, reviews and commits the exact revision, then pushes GitHub if requested. A GitHub push is a backup and does not publish to app-live. The project chat publishes the reviewed revision by synchronizing only its tracked runtime source files to app-live, preserving its .env, family data, runtime, mounted models, caches, private media, backups, app-test, and unknown files. It then reads back the changed files, checks the application health and gateway login entry, and restarts only the service units that use changed runtime code. Documentation or test-only changes do not require a service restart.
 
@@ -38,7 +44,7 @@ These units describe the optional loopback-only inference services. As of 2026-0
 
 Never restart vLLM, TTS, and SoulX together. Never increase any GPU fraction merely to hide a latency problem.
 
-## Current rollback
+## 2026-09 historical rollback (old paths; use current cutover recovery above)
 
 The pre-deferred-cue TTS server is preserved at:
 

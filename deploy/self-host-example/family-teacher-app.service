@@ -5,13 +5,13 @@ PartOf=family-ai-tts.service
 BindsTo=family-ai-tts.service
 
 [Service]
-WorkingDirectory=/home/selfhost/family-ai-teacher/app-live
-EnvironmentFile=/home/selfhost/family-ai-teacher/app-live/.env
+WorkingDirectory=/home/selfhost/workspaces/Personal Project/family-ai-teacher/app-live
+EnvironmentFile=/home/selfhost/workspaces/Personal Project/family-ai-teacher/app-live/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/home/selfhost/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/selfhost
-Environment=LD_LIBRARY_PATH=/home/selfhost/family-ai-teacher/runtime/tts/.venv/lib/python3.10/site-packages/nvidia/cublas/lib:/home/selfhost/family-ai-teacher/runtime/tts/.venv/lib/python3.10/site-packages/nvidia/cudnn/lib
-ExecStart=/home/selfhost/family-ai-teacher/runtime/teacher-app/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18760 --no-access-log
+Environment="LD_LIBRARY_PATH=/home/selfhost/workspaces/Personal Project/family-ai-teacher/runtime/tts/.venv/lib/python3.10/site-packages/nvidia/cublas/lib:/home/selfhost/workspaces/Personal Project/family-ai-teacher/runtime/tts/.venv/lib/python3.10/site-packages/nvidia/cudnn/lib"
+ExecStart="/home/selfhost/workspaces/Personal Project/family-ai-teacher/runtime/teacher-app/bin/python" -m uvicorn app.main:app --host 127.0.0.1 --port 18760 --no-access-log
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

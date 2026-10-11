@@ -14,10 +14,11 @@ from pathlib import Path
 
 
 HOME = Path.home()
-IDENTITY = HOME / "family-ai-teacher" / "assets" / "parent" / "portrait.jpg"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+IDENTITY = PROJECT_ROOT / "assets" / "parent" / "portrait.jpg"
 DROPIN = HOME / ".config" / "systemd" / "user" / "family-ai-soulx.service.d" / "20-parent-avatar.conf"
-PYTHON = "/home/selfhost/family-ai-teacher/runtime/flashhead/.venv/bin/python"
-RUNNER = "/home/selfhost/family-ai-teacher/services/remote_soulx_runner.py"
+PYTHON = str(PROJECT_ROOT / "runtime" / "flashhead" / ".venv" / "bin" / "python")
+RUNNER = str(PROJECT_ROOT / "services" / "remote_soulx_runner.py")
 CKPT = "/media/selfhost/ssd4t-data1/family-ai-teacher/models/SoulX-FlashHead-1_3B"
 WAV2VEC = "/media/selfhost/ssd4t-data1/family-ai-teacher/models/wav2vec2-base-960h"
 
@@ -59,9 +60,9 @@ def activate() -> None:
         raise ValueError("A bounded JPEG portrait is required")
     prior_image = IDENTITY.read_bytes() if IDENTITY.exists() else None
     prior_dropin = DROPIN.read_bytes() if DROPIN.exists() else None
-    unit = ("[Service]\nExecStart=\nExecStart=" + PYTHON + " " + RUNNER +
-            " --cond-image " + str(IDENTITY) + " --ckpt " + CKPT +
-            " --wav2vec " + WAV2VEC + " --host 127.0.0.1 --port 8791\n")
+    unit = ('[Service]\nExecStart=\nExecStart="' + PYTHON + '" "' + RUNNER +
+            '" --cond-image "' + str(IDENTITY) + '" --ckpt "' + CKPT +
+            '" --wav2vec "' + WAV2VEC + '" --host 127.0.0.1 --port 8791\n')
     try:
         atomic_write(IDENTITY, content)
         atomic_write(DROPIN, unit.encode("utf-8"))
