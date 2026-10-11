@@ -6,7 +6,7 @@ AI Station now owns the independent teacher application, family data, authentica
 
 ## 2026-10-11 Maintenance ownership and release flow
 
-The directory move is approved but has not run. Until the move is verified, the container root is /home/selfhost/family-ai-teacher, its repository child is the maintenance checkout, and app-live remains the production source. After verified relocation, the only daily Git checkout is /home/selfhost/workspaces/Personal Project/family-ai-teacher/repository; the separate app-live copy remains the serving runtime, app-test remains the retained old copy, and the old root stays as a compatibility link.
+The directory move is verified. The only daily Git checkout is `/home/selfhost/workspaces/Personal Project/family-ai-teacher/repository`; `app-live` in the same container remains the serving source, `app-test` remains the retained old copy, and `/home/selfhost/family-ai-teacher` is a compatibility symlink to the new project root.
 
 For each code change, the project chat edits and validates only the maintenance checkout, reviews and commits the exact revision, then pushes GitHub if requested. A GitHub push is a backup and does not publish to app-live. The project chat publishes the reviewed revision by synchronizing only its tracked runtime source files to app-live, preserving its .env, family data, runtime, mounted models, caches, private media, backups, app-test, and unknown files. It then reads back the changed files, checks the application health and gateway login entry, and restarts only the service units that use changed runtime code. Documentation or test-only changes do not require a service restart.
 
