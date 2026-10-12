@@ -35,13 +35,18 @@ async (page) => {
   await page.locator("#playButton").click();
   await page.locator("#playChoices button", { hasText: "下棋" }).click();
   await page.locator(".chess-board:not([hidden])").waitFor();
-  await page.waitForTimeout(100);
+  await page.locator('[data-square="b4"]').click();
+  await page.locator('.chess-board__continue').click();
+  for (const square of ["e2", "d4", "c3"]) await page.locator(`[data-square="${square}"]`).click();
+  await page.locator('.chess-board__continue').click();
+  await page.waitForFunction(() => document.querySelector('.chess-board__grid').getAttribute('aria-busy') === 'false');
   const source = await page.evaluate(() => ({
     source: document.querySelector('[data-square="e2"]').classList.contains("is-guidance-source"),
     target: document.querySelector('[data-square="e3"]').classList.contains("is-guidance-target"),
     lineHidden: document.querySelector(".chess-board__guide-path line").hidden,
   }));
   await page.locator('[data-square="e2"]').click();
+  await page.waitForFunction(() => document.querySelector('.chess-board__grid').getAttribute('aria-busy') === 'false');
   const path = await page.evaluate(() => ({
     source: document.querySelector('[data-square="e2"]').classList.contains("is-guidance-source"),
     target: document.querySelector('[data-square="e3"]').classList.contains("is-guidance-target"),
@@ -52,6 +57,7 @@ async (page) => {
   await page.screenshot({ path: "output/playwright/chess-guidance-learn-390x844.png", fullPage: false });
   await page.getByRole("button", { name: "和爸爸下棋" }).click();
   await page.getByRole("button", { name: "给我提示" }).click();
+  await page.waitForFunction(() => document.querySelector('.chess-board__grid').getAttribute('aria-busy') === 'false');
   const playHint = await page.evaluate(() => ({
     sourceCount: document.querySelectorAll(".is-guidance-source").length,
     targetCount: document.querySelectorAll(".is-guidance-target").length,
@@ -63,11 +69,11 @@ async (page) => {
     && path.source && path.target && !path.lineHidden && path.coordinates === "e2→e3"
     && playHint.sourceCount === 1 && playHint.targetCount === 1 && !playHint.lineHidden
     && tts.some(item => /e2.*e3/.test(item.text || ""))
-    && mediaRequests.length === 1 && mediaRequests[0].audio && !mediaRequests[0].video
+    && mediaRequests.length === 0
     && errors.length === 0;
   return {
     status: pass ? "PASS" : "FAIL", source, path, playHint,
     spokenInstructions: tts.map(item => item.text), mediaRequests, errors,
-    boundary: "Profile, history, health, TTS and avatar socket are mocked; microphone permission is denied after recording the audio-only request. No family data or physical media is used.",
+    boundary: "Profile, history, health, TTS and avatar socket are mocked; no microphone permission is requested. No family data or physical media is used.",
   };
 }

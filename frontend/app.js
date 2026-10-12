@@ -2223,10 +2223,10 @@ async function speakChessInstruction(text) {
   if (activeRequestController) {
     return { ok: false, error: "我先回答你刚才的问题。想听棋盘讲解，可以稍后点“再听一遍”。" };
   }
-  if (conversationStarting) return { ok: false, error: "麦克风还在准备，可以先下棋，稍后再听讲解。" };
+  if (conversationStarting) return { ok: false, error: "麦克风还在准备，稍后点“再听一遍”听讲解。" };
   if (!instruction || instruction.length > 200) {
     cancelChessExplanation(true);
-    return { ok: false, error: "这句讲解太长了，先看棋盘上的提示吧。" };
+    return { ok: false, error: "这句讲解暂时没准备好，请点“再听一遍”。" };
   }
   const generation = chessSpeechGeneration;
   const controller = new AbortController();
@@ -2262,7 +2262,6 @@ async function speakChessInstruction(text) {
     activeTurnId = null;
     setBusy(true);
     setStatus("爸爸老师正在准备讲解棋盘…", "thinking");
-    if (conversationActive) startBargeInMonitor();
     timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 30000);
     const response = await fetch("/api/tts", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -2282,7 +2281,7 @@ async function speakChessInstruction(text) {
   } catch (_) {
     if ((!current() && !timedOut) || chessSpeechController !== controller
         || generation !== chessSpeechGeneration) return { ok: false, aborted: true };
-    return { ok: false, error: "这次讲解的声音没播出来。可以点“再听一遍”，棋盘还能继续玩。" };
+    return { ok: false, error: "这次讲解的声音没播出来。点“再听一遍”，听完再试。" };
   } finally {
     if (timeout !== null) clearTimeout(timeout);
     controller.signal.removeEventListener("abort", releasePlayback);
@@ -2327,14 +2326,9 @@ async function openChessActivity() {
   try {
     if (typeof globalThis.ChessBoard !== "function") {
       await Promise.race([
-        import("/chess-board.js?v=20260927-journey2"),
+        import("/chess-board.js?v=20261011-listen-first"),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("chess module timeout")), 5000); }),
       ]);
-    }
-    if (generation !== chessOpenGeneration || !activityEnabled("game")) return;
-    if (!conversationActive) {
-      try { await startContinuousConversation(); }
-      catch (_) { recordHint.textContent = "麦克风暂时没打开，棋盘仍然可以玩；也可以请家长帮忙打开麦克风。"; }
     }
     if (generation !== chessOpenGeneration || !activityEnabled("game")) return;
     drawingBoard?.close();
@@ -2532,7 +2526,7 @@ function setCameraActionState(open) {
   cameraButton.dataset.open = String(open);
   cameraToolbar.dataset.cameraOpen = String(open);
   cameraButton.setAttribute("aria-pressed", String(open));
-  if (cameraState) cameraState.textContent = open ? "关" : "打开摄像头";
+  if (cameraState) cameraState.textContent = open ? "关闭" : "打开摄像头";
   cameraButton.title = open ? "关闭摄像头" : "打开摄像头";
   cameraButton.setAttribute("aria-label", open ? "关闭摄像头" : "打开摄像头");
 }

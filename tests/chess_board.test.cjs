@@ -235,7 +235,9 @@ test("late success narration cannot overwrite a voice-requested next lesson or r
   const pending = [];
   const f = await fixture({ onSpeak: text => new Promise(resolve => pending.push({ text, resolve })) }); f.board.open(); moveLesson(f.board);
   try {
-    f.click("e2"); f.click("e3");
+    pending.at(-1).resolve({ ok: true }); await settle();
+    f.click("e2"); pending.at(-1).resolve({ ok: true }); await settle();
+    f.click("e3");
     const success = pending.at(-1);
     assert.match(success.text, /对啦.*白兵/);
     f.click("e3"); assert.equal(pending.at(-1), success);
@@ -264,19 +266,21 @@ test("the second and third lessons compute their own source, target and arrow co
   } finally { f.board.destroy(); }
 });
 
-test("hint and repeat preserve their lesson visual guidance while narration is still playing", async () => {
+test("hint and repeat reveal lesson visual guidance only after narration completes", async () => {
   const pending = [];
   const f = await fixture({ onSpeak: () => new Promise(resolve => pending.push(resolve)) }); f.board.open(); moveLesson(f.board);
   try {
     assert.equal(f.board.guidancePhase, "source");
     f.board.repeatButton.dispatch("click");
     assert.equal(f.board.guidancePhase, "source");
-    assert.match(f.board.cells.get("e2").cell.className, /is-guidance-source/);
+    assert.doesNotMatch(f.board.cells.get("e2").cell.className, /is-guidance-source/);
+    pending.at(-1)({ ok: true }); await settle();
     f.board.hint();
     assert.equal(f.board.guidancePhase, "path");
-    assert.match(f.board.cells.get("e3").cell.className, /is-guidance-target/);
-    assert.equal(f.board.guideLine.hidden, false);
+    assert.doesNotMatch(f.board.cells.get("e3").cell.className, /is-guidance-target/);
+    assert.equal(f.board.guideLine.hidden, true);
     pending.at(-1)({ ok: true }); await settle();
+    assertVisiblePath(f.board, { from: "e2", to: "e3" });
     assert.equal(f.board.guidancePhase, "path", "the current spoken hint keeps its source and target visible");
   } finally { f.board.destroy(); }
 });
@@ -418,7 +422,9 @@ test("closing cancels host narration before restoring focus to its temporarily d
 test("the opponent waits for the current explanation, continues after voice failure and ignores speech settled after close", async () => {
   const pending = [];
   const f = await fixture({ onSpeak: () => new Promise(resolve => pending.push(resolve)) });
-  f.board.open(); f.board.startMode("play"); f.click("e2"); f.click("e4");
+  f.board.open(); f.board.startMode("play");
+  pending.at(-1)({ ok: true }); await settle();
+  f.click("e2"); pending.at(-1)({ ok: true }); await settle(); f.click("e4");
   try {
     assert.equal(f.timers.size, 0); const explanation = pending.at(-1);
     f.board.hint(); const replacement = pending.at(-1);
@@ -478,5 +484,41 @@ test("conversation context reflects black turn, automatic promotion, terminal st
     const ending = f.board.getConversationContext();
     assert.match(ending, /黑王被将死了.*白棋赢/); assert.match(ending, /合法走法：无/);
     assert.ok(ending.length <= 3000); assert.doesNotMatch(ending, /建议尝试：[a-h]/);
+  } finally { f.board.destroy(); }
+});
+
+
+test("board clicks and answer cues wait for complete playback, including failed retry and stale speech", async () => {
+  const pending = [], progress = [];
+  const f = await fixture({ onSpeak: () => new Promise((resolve, reject) => pending.push({ resolve, reject })), onProgress: event => progress.push(event) });
+  f.board.open();
+  try {
+    const before = f.board.game.fen(), first = pending.at(-1);
+    for (let i = 0; i < 10; i++) f.click("b4");
+    assert.equal(f.board.game.fen(), before); assert.equal(f.board.lessonComplete, false);
+    assert.equal(progress.length, 0); assert.equal(pending.length, 1);
+    assert.equal(f.board.grid.getAttribute("aria-busy"), "true");
+    assert.ok([...f.board.cells.values()].every(({ cell }) => cell.disabled));
+    assert.doesNotMatch(f.board.cells.get("b4").cell.className, /is-guidance-source/);
+    first.resolve({ ok: false, aborted: true }); await settle();
+    assert.equal(f.board.speechReady, false); assert.equal(f.board.repeatButton.disabled, false);
+    f.click("b4"); assert.equal(f.board.lessonComplete, false);
+    f.board.repeatButton.dispatch("click"); pending.at(-1).reject(new Error("synthetic failure")); await settle();
+    assert.equal(f.board.speechReady, false);
+    f.board.repeatButton.dispatch("click"); const stale = pending.at(-1);
+    f.board.reset(); const current = pending.at(-1);
+    stale.resolve({ ok: true }); await settle(); assert.equal(f.board.speechReady, false);
+    current.resolve({ ok: true }); await settle();
+    assert.equal(f.board.grid.getAttribute("aria-busy"), "false");
+    assert.equal(f.board.cells.get("b4").cell.disabled, false);
+    assert.match(f.board.cells.get("b4").cell.className, /is-guidance-source/);
+    f.click("b4"); assert.equal(f.board.lessonComplete, true);
+    f.board.nextLesson(); assert.equal(f.board.speechReady, false);
+    f.click("e2"); assert.equal(f.board.pieceStep, 0);
+    pending.at(-1).resolve({ ok: true }); await settle();
+    f.click("e2"); assert.equal(f.board.pieceStep, 1);
+    f.click("d4"); assert.equal(f.board.pieceStep, 1, "wait for the next piece explanation too");
+    f.board.close(); pending.at(-1).resolve({ ok: true }); await settle();
+    assert.equal(f.board.speaking, false); assert.equal(f.timers.size, 0);
   } finally { f.board.destroy(); }
 });

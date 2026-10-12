@@ -1032,7 +1032,7 @@ h2 {
 
 /* 2026-09 child home: one main action and one responsive activity path. */
 .camera-toggle { position: relative; }
-.camera-state { position: absolute; right: 3px; bottom: 2px; min-width: 16px; padding: 1px 3px; border-radius: 5px; background: var(--paper); color: var(--muted); font-size: 10px; font-weight: 700; }
+.camera-state { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .camera-toggle[data-open="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 .record-video-tool { position: relative; }
 .record-progress { position: absolute; inset: -3px; border: 3px solid transparent; border-top-color: currentColor; border-radius: inherit; opacity: 0; transform: rotate(calc(var(--record-progress, 0) * 3.6deg)); }
@@ -1050,8 +1050,6 @@ h2 {
 .chat-history .live-turn { margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--line); }
 
 @media (max-width: 640px) {
-  .stage-card.call-view .child-video .camera-toolbar { width: auto; }
-  .stage-card.call-view .child-video .camera-tool { flex: 0 0 48px; }
   .stage-heading { display: none; }
   .stage-card .activity-row { grid-template-columns: 1fr; }
   .stage-card .activity-chip { min-height: 52px; padding: 8px 12px; font-size: 15px; }

@@ -97,26 +97,18 @@ test('new explanation cancels current sound; closing cancels the replacement wit
   assert.equal(f.c.queueGeneration, generation);
 });
 
-test('the actual barge-in hook stops chess sound and preserves the new child preroll', async () => {
-  const f = fixture(), cancellations = [];
-  f.c.cancelConversationTurn = id => { if (id) cancellations.push(id); };
+test('child barge-in stays paused until chess narration finishes', async () => {
+  const f = fixture();
   vm.runInContext(section('function triggerBargeIn()', 'function checkBargeIn()'), f.c);
   const pending = f.speak('白马可以跳过棋子。'); await nextTick();
   f.requests[0].wait.resolve(response()); await nextTick();
-  f.c.bargeInPcmChunks = ['first-child-syllable'];
+  f.c.bargeInPcmChunks = ['child-noise'];
   f.c.triggerBargeIn();
-  assert.equal((await pending).aborted, true);
+  assert.equal(f.c.bargeInMonitoring, false);
+  assert.equal(f.c.segmentRecording, false);
+  assert.equal(f.requests[0].options.signal.aborted, false);
+  f.plays[0].wait.resolve(); assert.equal((await pending).ok, true);
   assert.equal(f.c.segmentRecording, true);
-  assert.deepEqual(Array.from(f.c.segmentPcmChunks), ['first-child-syllable']);
-  assert.equal(f.c.speechStartedAt, 100);
-  assert.equal(f.c.activeRequestController, null);
-  assert.deepEqual(cancellations, []);
-  const explanation = await f.speak('黑兵从 e7 走到 e5。');
-  assert.equal(explanation.ok, false);
-  assert.match(explanation.error, /先听你说/);
-  assert.equal(f.requests.length, 1, 'an automatic opponent explanation must not start new TTS during child speech');
-  assert.deepEqual(Array.from(f.c.segmentPcmChunks), ['first-child-syllable']);
-  assert.equal(f.c.speechStartedAt, 100);
 });
 
 test('voice failure remains retryable without microphone permission or family requests', async () => {
@@ -146,7 +138,7 @@ test('opening chess is independent of microphone permission and closes drawing f
   assert.equal(f.c.chessBoard.isOpen, true);
   assert.equal(f.requests.length, 0);
   assert.equal(f.c.conversationActive, false);
-  assert.equal(permissionAttempts, 1);
+  assert.equal(permissionAttempts, 0);
   f.c.activityEnabled = () => false; f.c.chessBoard = null;
   await f.c.openChessActivity(); assert.equal(f.c.chessBoard, null);
 });
@@ -200,44 +192,36 @@ test('an actual child request survives a late automatic opponent explanation', a
   assert.equal((await pending).ok, false);
 });
 
-test('a fresh chess click opens continuous voice and resumes listening after the initial explanation', async () => {
+test('a fresh chess click explains first without requesting or starting the microphone', async () => {
   const f = fixture({ conversationActive: false, chessBoard: null, segmentRecording: false });
-  const permission = deferred(); let starts = 0, spoken;
-  f.c.startContinuousConversation = async () => {
-    starts++; f.c.conversationStarting = true;
-    await permission.promise;
-    f.c.conversationStarting = false; f.c.conversationActive = true; f.c.beginContinuousSegment();
-  };
+  let spoken;
+  f.c.startContinuousConversation = () => { throw new Error('must not start child listening'); };
   f.c.ChessBoard = class {
     constructor(options) { this.options = options; }
     open() { this.isOpen = true; spoken = this.options.onSpeak('白兵每次向前走。'); }
   };
-  const opening = f.c.openChessActivity(); await nextTick();
-  assert.equal(starts, 1); assert.equal(f.requests.length, 0);
-  permission.resolve(); await opening; await nextTick();
-  assert.equal(f.c.chessBoard.isOpen, true); assert.equal(f.c.conversationActive, true);
+  await f.c.openChessActivity(); await nextTick();
+  assert.equal(f.c.chessBoard.isOpen, true); assert.equal(f.c.conversationActive, false);
   assert.equal(f.requests.length, 1); assert.equal(f.requests[0].url, '/api/tts');
   f.requests[0].wait.resolve(response()); await nextTick();
-  assert.equal(f.plays.length, 1);
+  assert.equal(f.plays.length, 1); assert.equal(f.c.bargeInMonitoring, false);
   f.plays[0].wait.resolve(); assert.equal((await spoken).ok, true);
-  assert.equal(f.c.segmentRecording, true);
+  assert.equal(f.c.segmentRecording, false);
+  assert.equal(f.calls.includes('listen'), false);
   assert.equal(f.c.activeRequestController, null);
-  assert.equal(starts, 1);
 });
 
-test('a superseded or parent-disabled chess entry is not opened after microphone permission resolves', async () => {
+test('a superseded or parent-disabled chess entry is not opened after audio preparation', async () => {
   for (const scenario of ['superseded', 'disabled']) {
     const f = fixture({ conversationActive: false, chessBoard: null });
-    const permission = deferred(); let opened = 0;
-    f.c.startContinuousConversation = () => permission.promise;
+    let opened = 0;
+    f.c.prepareStreamingAudio = () => {
+      if (scenario === 'superseded') f.c.chessOpenGeneration++;
+      else f.c.activityEnabled = () => false;
+    };
     f.c.ChessBoard = class { open() { opened++; } };
-    const pending = f.c.openChessActivity(); await nextTick();
-    assert.equal(opened, 0);
-    if (scenario === 'superseded') f.c.chessOpenGeneration++;
-    else f.c.activityEnabled = () => false;
-    permission.resolve(); await pending;
-    assert.equal(opened, 0);
-    assert.equal(f.requests.length, 0);
+    await f.c.openChessActivity();
+    assert.equal(opened, 0); assert.equal(f.requests.length, 0);
   }
 });
 
