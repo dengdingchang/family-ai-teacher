@@ -7,6 +7,12 @@ gives their child a patient, always-available "AI dad/mom teacher" that runs
 on the family's own hardware. The child talks, draws, plays and learns in
 short guided steps; everything personal stays in the home by design.
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="A young child drawing and learning chess with his AI dad teacher" width="360">
+  <br>
+  <em>Real footage from the author's family: drawing and chess lessons with "Dad Teacher".</em>
+</p>
+
 > Status: working system in daily use by the author's family since
 > September 2026, under active development. Currently a single-family
 > deployment; multi-family isolation is on the roadmap.
