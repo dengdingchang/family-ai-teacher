@@ -21,8 +21,15 @@ class ParentAvatarBridge:
         self.host = host
 
     def _remote(self, action: str, image: bytes | None = None) -> None:
+        # ssh runs the remote command from the remote user's home directory,
+        # so a home-relative default works on any self-hosted machine.
+        # Override with PARENT_AVATAR_REMOTE_SCRIPT when the layout differs.
+        remote_script = os.getenv(
+            "PARENT_AVATAR_REMOTE_SCRIPT",
+            "family-ai-teacher/services/parent_avatar.py",
+        )
         command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", self.host,
-                   "python3", "/home/selfhost/family-ai-teacher/services/parent_avatar.py", action]
+                   "python3", remote_script, action]
         if os.getenv("PARENT_AVATAR_TRANSPORT", "ssh") == "local":
             command = [sys.executable, os.environ["PARENT_AVATAR_SCRIPT"], action]
         for attempt in range(2):
