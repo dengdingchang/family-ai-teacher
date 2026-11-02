@@ -1073,15 +1073,20 @@ class MemoryStore:
             },
         )
 
-    def get_growth_journal(self) -> list[dict[str, Any]]:
-        """Rebuild every weekly journal from append-only structured family data."""
+    def get_growth_journal(self, history: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        """Rebuild every weekly journal from append-only structured family data.
+
+        ``history`` lets a caller that already read the conversation history
+        reuse it instead of scanning the whole file a second time.
+        """
 
         buckets: dict[str, dict[str, Any]] = {}
         seen_companionship_records: set[tuple[str, ...]] = set()
         now = datetime.now().astimezone()
         self._journal_bucket(buckets, now)
 
-        for record in self.get_history():
+        records = self.get_history() if history is None else history
+        for record in records:
             timestamp = self._local_datetime(record.get("created_at"))
             if timestamp is None:
                 continue
@@ -1266,7 +1271,7 @@ class MemoryStore:
             "play_summary": self.get_activity_summary(),
             "next_activity": self.next_activity(),
             "parent_messages": self.get_parent_messages(limit=20),
-            "growth_journal": self.get_growth_journal(),
+            "growth_journal": self.get_growth_journal(history),
         }
 
     def export_bundle(self) -> dict[str, Any]:

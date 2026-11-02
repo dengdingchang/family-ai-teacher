@@ -47,6 +47,6 @@ test('unconfigured remote brain still clearly offers the available local voice a
   });
   vm.runInContext(fn, c);
   await vm.runInContext('checkHealth()', c);
-  assert.equal(c.serviceBadge.textContent, '本地活动可以玩');
+  assert.equal(c.serviceBadge.textContent, '可以玩了');
   assert.match(statuses[0], /画画、故事和数字/);
 });

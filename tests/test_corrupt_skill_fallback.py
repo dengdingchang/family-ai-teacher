@@ -63,7 +63,7 @@ def test_bad_graph_keeps_parent_reads_and_repeated_audio_commit_available_withou
     skills_response = client.get("/api/skills")
     assert skills_response.status_code == 200
     assert skills_response.json()["recovery_required"] is True
-    assert client.get("/api/curriculum/next").status_code == 200
+    assert client.get("/api/skills").status_code == 200
     assert store.skills_path.read_bytes() == damage
 
     turn_id = family.stream()

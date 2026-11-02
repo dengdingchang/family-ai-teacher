@@ -26,15 +26,23 @@ function savePlayEvent(payload) {
   pendingPlayEvents.set(event.event_id, event);
   return postPlayEvent(event);
 }
+function syncActivityNow() {
+  if (!activityNow) return;
+  const label = ACTIVITY_LABELS[playActivity] || "";
+  activityNow.hidden = !label;
+  if (activityNowLabel) activityNowLabel.textContent = label ? ` · ${label}` : "";
+}
 function endPlayActivity() {
   if (!playActivity) return;
   if (playStartedAt) void savePlayEvent({ kind: "session", duration_seconds: (performance.now() - playStartedAt) / 1000 }).catch(() => {});
   playActivity = ""; playStartedAt = 0; playStep = "";
+  syncActivityNow();
 }
 function beginPlayActivity(name, step = "") {
   if (playActivity !== name) endPlayActivity();
   playActivity = name; playStep = step;
   if (!playStartedAt && !document.hidden) playStartedAt = performance.now();
+  syncActivityNow();
 }
 document.addEventListener("visibilitychange", () => {
   if (!playActivity) return;
@@ -75,6 +83,11 @@ const childWelcome = document.querySelector("#childWelcome");
 const conversationTitle = document.querySelector("#conversationTitle");
 const playButton = document.querySelector("#playButton");
 const playChoices = document.querySelector("#playChoices");
+const activityNow = document.querySelector("#activityNow");
+const activityNowLabel = document.querySelector("#activityNowLabel");
+const activityNowExit = document.querySelector("#activityNowExit");
+const dadInvite = document.querySelector("#dadInvite");
+const ACTIVITY_LABELS = { drawing: "画画", story: "故事", game: "互动游戏", music: "音乐", chess: "下棋" };
 const defaultEnabledActivities = ["drawing", "story", "game", "music", "vision_photo", "vision_video"];
 let enabledActivities = new Set(defaultEnabledActivities);
 let childProfileLoaded = false;
@@ -313,11 +326,19 @@ function waitForMediaPoll(delayMs, signal) {
   });
 }
 
+// Image jobs take minutes, not seconds: start quick, then back off so a slow
+// generation does not cost one request every two seconds.
+function mediaPollDelay(attempt) {
+  return Math.min(1200 * 2 ** Math.min(attempt, 4), 8000);
+}
+
 async function pollGeneratedMedia(job, topic, group, controller, generation) {
   const statusUrl = String(job?.status_url || "");
   if (!/^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(statusUrl)) return;
+  const startedAt = Date.now();
   for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (!await waitForMediaPoll(2000, controller.signal)) return;
+    if (!await waitForMediaPoll(mediaPollDelay(attempt), controller.signal)) return;
+    if (Date.now() - startedAt > 180000) return;
     if (controller.signal.aborted || generation !== mediaSuggestionGeneration) return;
     const response = await fetch(statusUrl, { signal: controller.signal });
     const result = await response.json().catch(() => ({}));
@@ -2159,8 +2180,10 @@ async function prepareMusicTheme(subject, { isCurrent = () => true } = {}) {
     const jobUrl = payload.image_generation_job?.status_url;
     if (!card && /^\/api\/image-generation\/jobs\/[0-9a-f]{32}$/.test(jobUrl || "")) {
       musicThemeJobUrl = jobUrl;
+      const themeJobStartedAt = Date.now();
       for (let attempt = 0; attempt < 150; attempt++) {
-        if (!await waitForMediaPoll(2000, controller.signal)) return;
+        if (!await waitForMediaPoll(mediaPollDelay(attempt), controller.signal)) return;
+        if (Date.now() - themeJobStartedAt > 300000) break;
         if (musicThemeController !== controller || !isCurrent()) {
           if (musicThemeController === controller) cancelMusicTheme();
           return;
@@ -2423,6 +2446,16 @@ for (const button of activityButtons) {
       : button.dataset.activity === "drawing" ? openDrawingActivity(button) : startActivityConversation(button));
   });
 }
+
+// One visible "what am I playing" reminder with its own way out, so leaving a
+// conversation-only activity (story, game) never depends on the child's memory.
+activityNowExit?.addEventListener("click", () => {
+  if (drawingBoard?.isOpen) { drawingBoard.close(); return; }
+  if (chessBoard?.isOpen) { chessBoard.close(); return; }
+  if (musicStudio?.opened) { musicStudio.close(); return; }
+  endPlayActivity();
+  setStatus("不玩了。想换一个就告诉我。", "idle");
+});
 function handlePageHide() {
   endPlayActivity();
   pageIsLeaving = true;
@@ -2857,6 +2890,7 @@ async function checkHealth() {
       } else connectAvatar();
     }
     setAvatarIdleAvailable(payload.avatar_idle_ready === true);
+    if (typeof dadInvite !== "undefined" && dadInvite) dadInvite.hidden = payload.parent_identity_active === true;
     const localReady = payload.stt_ready && payload.tts_ready;
     const configured = payload.llm_configured && localReady;
     if (Number.isFinite(Number(payload.avatar_audio_lead_ms))) {
@@ -2870,7 +2904,7 @@ async function checkHealth() {
         ? "声音还没准备好，可以试着说话"
         : configured
         ? "准备好了"
-        : localReady ? "本地活动可以玩" : "需要家长设置";
+        : localReady ? "可以玩了" : "声音还没准备好";
     serviceBadge.classList.toggle("ready", localReady && !warming && !voiceUncertain);
     serviceBadge.classList.toggle("warn", !localReady || warming || voiceUncertain);
     if (mayUpdateIdle()) setBusy(warming);

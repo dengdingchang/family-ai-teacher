@@ -2734,36 +2734,44 @@ async def health() -> dict[str, Any]:
     }
 
 
-@app.get("/api/health/llm")
-async def llm_health() -> dict[str, Any]:
-    if not llm.configured:
-        raise HTTPException(status_code=503, detail="LLM settings are incomplete in .env")
-    ok, latency_s, detail = await asyncio.to_thread(llm.check_models)
-    if not ok:
-        raise HTTPException(status_code=502, detail={"ok": False, "latency_s": latency_s, "detail": detail})
-    return {"ok": True, "latency_s": latency_s, "detail": detail, "model": settings.llm_model}
-
-
 @app.get("/api/profile")
 async def get_child_profile() -> dict[str, Any]:
     return _profile_for_client(memory.get_child_profile())
 
 
-def _require_local_settings_request(request: Request) -> None:
+def _same_origin_request(request: Request) -> bool:
+    """True when a parent action comes from a page of this same app.
+
+    Phones, the LAN address and the preview proxy all rewrite ``Host``, so the
+    browser's own ``Sec-Fetch-Site: same-origin`` verdict is the reliable
+    signal there; the Origin/Host comparison remains for older browsers and
+    loopback tools such as curl.
+    """
+
     from urllib.parse import urlsplit
-    if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
-        raise HTTPException(status_code=403, detail="请从本机爸爸老师打开设置")
-    origin = request.headers.get("origin")
-    allowed_origins = {str(request.base_url).rstrip("/")}
-    if request.client and request.client.host in {"127.0.0.1", "::1"}:
-        forwarded_host = request.headers.get("x-forwarded-host", "")
-        forwarded_proto = request.headers.get("x-forwarded-proto", "")
-        if forwarded_host and forwarded_proto in {"http", "https"}:
-            allowed_origins.add(f"{forwarded_proto}://{forwarded_host}")
-    if origin and origin.rstrip("/") not in allowed_origins:
-        raise HTTPException(status_code=403, detail="设置只接受本机同源页面操作")
+
     if request.headers.get("sec-fetch-site") == "cross-site":
-        raise HTTPException(status_code=403, detail="不接受跨站设置请求")
+        return False
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    if not origin:
+        if request.client and request.client.host in {"127.0.0.1", "::1"}:
+            return True
+        return request.url.hostname in {"127.0.0.1", "localhost", "::1"}
+    parsed = urlsplit(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    hosts = {request.headers.get("host", "").strip().lower()}
+    forwarded = request.headers.get("x-forwarded-host", "").split(",")[0].strip().lower()
+    if forwarded:
+        hosts.add(forwarded)
+    if parsed.netloc.lower() in hosts:
+        return True
+    return request.headers.get("sec-fetch-site") == "same-origin"
+
+
+def _require_local_settings_request(request: Request) -> None:
+    if not _same_origin_request(request):
+        raise HTTPException(status_code=403, detail="设置只接受家长空间的同源页面操作")
 
 
 @app.get("/api/parent/models")
@@ -2945,12 +2953,6 @@ async def transcribe(audio: UploadFile = File(...)) -> dict[str, Any]:
             temporary_path.unlink(missing_ok=True)
         except OSError:
             pass
-
-
-@app.post("/api/conversation")
-async def conversation(audio: UploadFile = File(...)) -> dict[str, Any]:
-    transcription = await transcribe(audio)
-    return await _answer_text(str(transcription["text"]), stt_result=transcription)
 
 
 @app.post("/api/conversation/text")
@@ -3274,21 +3276,6 @@ async def synthesize_tts(request: TextRequest) -> dict[str, Any]:
     return payload
 
 
-@app.get("/api/camera/status")
-async def camera_status() -> dict[str, Any]:
-    return {
-        "preview": "browser",
-        "capture_frame": "/api/camera/capture",
-        "automatic_upload": False,
-        "automatic_upload_only_with_next_voice_turn": False,
-        "persisted": False,
-        "automatic_vision_during_conversation": False,
-        "automatic_vision_interval_s": None,
-        "manual_vision_requires_explicit_click": True,
-        "manual_video_analysis": "/api/vision/describe-video",
-    }
-
-
 @app.post("/api/camera/capture")
 async def capture_frame(request: Request) -> dict[str, Any]:
     _require_activity_enabled("vision_photo")
@@ -3345,7 +3332,6 @@ async def observe_child(request: Request) -> dict[str, Any]:
     return await _vision_request(request, "observe-child")
 
 
-@app.post("/api/vision/describe-video")
 async def describe_video(video: UploadFile = File(...)) -> dict[str, Any]:
     """Analyze a short child clip through a few temporary keyframes.
 
@@ -3432,15 +3418,6 @@ async def streaming_video_conversation(
     )
 
 
-@app.get("/api/memory/context")
-async def memory_context() -> dict[str, Any]:
-    return {
-        "profile": memory.get_child_profile(),
-        "recent_context": memory.get_recent_context(),
-        "recent_learning_events": memory.get_recent_learning_events(),
-    }
-
-
 @app.get("/api/memory/history")
 async def memory_history() -> dict[str, Any]:
     """Return the complete text-only history for the local conversation view."""
@@ -3504,11 +3481,6 @@ async def update_skill(skill_id: str, request: SkillUpdateRequest) -> dict[str, 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/curriculum/next")
-async def next_activity() -> dict[str, Any]:
-    return memory.next_activity()
-
-
 @app.get("/api/parent/messages")
 async def get_parent_messages() -> dict[str, Any]:
     messages = memory.get_parent_messages(limit=None)
@@ -3563,12 +3535,7 @@ async def record_activity_play(request: ActivityPlayRequest) -> dict[str, Any]:
 
 @app.post("/api/parent/rewards/{reward_id}/redeem")
 async def redeem_activity_reward(reward_id: str, request: Request) -> dict[str, Any]:
-    from urllib.parse import urlsplit
-    origin = urlsplit(request.headers.get("origin", ""))
-    hosts = {request.headers.get("host", "").lower()}
-    if request.client and request.client.host in {"127.0.0.1", "::1"}:
-        hosts.add(request.headers.get("x-forwarded-host", "").lower())
-    if request.headers.get("x-family-parent-action") != "redeem" or origin.scheme not in {"http", "https"} or origin.netloc.lower() not in hosts:
+    if request.headers.get("x-family-parent-action") != "redeem" or not _same_origin_request(request):
         raise HTTPException(status_code=403, detail="请从家长空间确认兑换")
     try:
         redeemed = await asyncio.to_thread(memory.redeem_activity_reward, reward_id)
@@ -3579,20 +3546,10 @@ async def redeem_activity_reward(reward_id: str, request: Request) -> dict[str, 
 
 def _require_enrollment_request(request: Request) -> None:
     # A custom header blocks ordinary cross-site forms; Origin rejects hostile JS.
-    from urllib.parse import urlsplit
     if request.headers.get("x-family-enroll") != "1":
         raise HTTPException(status_code=403, detail="请从家长录制引导页面操作")
-    origin = request.headers.get("origin", "").rstrip("/")
-    parsed = urlsplit(origin)
-    host = request.headers.get("host", "").lower()
-    forwarded = request.headers.get("x-forwarded-host", "").lower()
-    hosts = {host}
-    if request.client and request.client.host in {"127.0.0.1", "::1"} and forwarded:
-        hosts.add(forwarded)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.netloc.lower() not in hosts:
+    if not _same_origin_request(request):
         raise HTTPException(status_code=403, detail="录制只接受同源页面操作")
-    if request.headers.get("sec-fetch-site") == "cross-site":
-        raise HTTPException(status_code=403, detail="不接受跨站录制请求")
 
 
 @app.get("/api/parent/enrollment")

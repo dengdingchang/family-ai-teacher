@@ -78,6 +78,22 @@ body {
   .record-button { min-height: 64px; font-size: 18px; }
   .privacy-inline { max-width: 45%; text-align: right; }
 }
+/* Contextual status only appears once it has something to say. */
+.step-chip:empty { display: none; }
+/* A single, always-visible answer to "what am I playing?" with its own exit. */
+.activity-now { display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; margin: 10px 0 0; padding: 7px 8px 7px 15px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); font-size: 14px; font-weight: 650; }
+.activity-now[hidden] { display: none; }
+.activity-now-text strong { font-weight: 800; }
+.activity-now-exit { min-height: 40px; padding: 0 16px; border: 1px solid #cfe0d6; border-radius: 999px; background: #fffdf9; color: var(--accent-strong); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.activity-now-exit:hover { background: #eaf3ec; }
+.activity-now-exit:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* Entry point for the product's promise: the parent's own voice and face. */
+.dad-invite { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 14px; padding: 11px 16px; border-radius: 16px; background: #1f5141; color: #fffaf1; text-decoration: none; box-shadow: 0 8px 22px #16281f2e; }
+.dad-invite[hidden] { display: none; }
+.dad-invite strong { font-size: 15px; letter-spacing: -.02em; }
+.dad-invite span { font-size: 12px; color: #d5e5d7; }
+.dad-invite:hover, .dad-invite:focus-visible { background: #174637; color: #fffaf1; text-decoration: none; }
+.dad-invite:focus-visible { outline: 3px solid #174637; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .record-button, .activity-chip { transition: none; }
 }

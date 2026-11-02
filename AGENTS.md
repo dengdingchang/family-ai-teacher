@@ -1,6 +1,6 @@
 # Family AI Teacher project rules
 
-- Start each continuation from `docs/current-stage.md` and `docs/2026-09-06_handoff.md`; keep the former as the current execution matrix and the latter as the cross-device handoff.
+- Start each continuation from `README.md` (status and capabilities), `PRODUCT.md` (product rules) and `DESIGN.md` (visual language). Keep those three as the only current sources; handoff notes live in the pull request that changes them.
 
 - Deployment authority (2026-10-11): the owner authorizes AI Station as the independent application and family-data host; Windows remains a retained rollback deployment. Keep a single writable primary. Do not resume the Windows application before syncing new primary data back.
 - Read and reuse the existing Nathan TTS runtime; do not install another voice model without explicit approval.

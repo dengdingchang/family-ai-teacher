@@ -10,7 +10,6 @@ from pathlib import Path
 
 FILES = ("child_profile.json", "session_history.jsonl", "learning_events.jsonl",
          "memories.json", "skill_graph.json", "activity_state.json", "parent_messages.json",
-         "public_gateway_auth.json", "public_gateway_sessions.json",
          "parent_identity/portrait.jpg", "parent_identity/voice.f32",
          "parent_identity/active.json", "parent_identity/avatar.sha256")
 

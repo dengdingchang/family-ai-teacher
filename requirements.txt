@@ -1,7 +1,14 @@
-# These packages are already available in the audited local runtime.
-# This file documents the MVP surface; start.ps1 does not install anything.
+# Runtime packages for a clean install. `pip install -r requirements.txt` is
+# enough to serve the app; the voice/avatar models themselves are external.
 fastapi==0.135.2
 uvicorn==0.42.0
 httpx==0.28.1
 python-multipart==0.0.22
 pydantic==2.12.5
+# /ws/avatar (Server-Sent + WebSocket avatar transport) needs the WebSocket
+# implementation; without it uvicorn rejects the handshake with 404.
+websockets==15.0.1
+# Parent enrollment portrait quality checks and image fallbacks.
+Pillow==11.3.0
+# Numeric work in the STT/visual adapters and their tests.
+numpy==2.3.5

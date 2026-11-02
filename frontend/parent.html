@@ -36,14 +36,16 @@
         </div>
       </header>
 
-      <nav class="parent-nav" aria-label="成长空间导航">
-        <a href="/setup">家长形象</a><a href="#today">今天</a><a href="#learning">学习进度</a
-        ><a href="#memories">家庭记忆</a><a href="#familySettings">家庭设置</a>
+      <nav class="parent-nav" aria-label="成长空间导航" role="tablist">
+        <button class="parent-nav-tab" type="button" role="tab" data-layer-target="today" aria-selected="true">今天</button>
+        <button class="parent-nav-tab" type="button" role="tab" data-layer-target="growth" aria-selected="false">成长</button>
+        <button class="parent-nav-tab" type="button" role="tab" data-layer-target="settings" aria-selected="false">设置</button>
+        <a class="parent-nav-link" href="/setup">家长形象</a>
       </nav>
       <p id="dashboardStatus" class="dashboard-status" role="status">
         正在整理家庭的成长记录…
       </p>
-      <section class="identity-invite" aria-labelledby="identityInviteTitle">
+      <section class="identity-invite" data-layer="settings" aria-labelledby="identityInviteTitle">
         <div>
           <p class="eyebrow">让熟悉的陪伴来到孩子面前</p>
           <h2 id="identityInviteTitle">用自己的声音和形象，陪孩子一起学。</h2>
@@ -51,7 +53,7 @@
         </div>
         <a class="primary-button" href="/setup">开始家长录制 ↗</a>
       </section>
-      <section class="overview-grid" aria-label="今日概览">
+      <section class="overview-grid" data-layer="today" aria-label="今日概览">
         <article class="metric-card coral">
           <span>今天的交流</span>
           <strong
@@ -72,13 +74,13 @@
           <small>条由家庭长期保留</small>
         </article>
       </section>
-      <p id="interactionTimingNote" class="interaction-timing-note">
+      <p id="interactionTimingNote" class="interaction-timing-note" data-layer="today">
         交流计时含短暂等待，不含隐藏页面和长时间闲置；从启用计时后累计。
       </p>
 
       <section class="dashboard-grid">
         <div class="main-column">
-          <article class="panel today-panel" id="today">
+          <article class="panel today-panel" id="today" data-layer="today">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">TODAY</p>
@@ -95,16 +97,16 @@
             </div>
           </article>
 
-          <article class="panel play-progress" aria-labelledby="playProgressTitle">
+          <article class="panel play-progress" data-layer="today" aria-labelledby="playProgressTitle">
             <div class="panel-heading"><div><p class="eyebrow">一起玩的每一步</p><h2 id="playProgressTitle">活动与礼物</h2></div></div>
             <p class="panel-note">这里记录已保存的活动用时、最近一步和下棋胜负；小考验只记录尝试，不代表已经掌握。</p>
             <div id="playActivitySummary" class="play-activity-summary">还没有活动记录。</div>
-            <h3>等爸爸下班的神秘礼物</h3>
+            <h3>爸爸准备的奖励</h3>
             <div id="playRewards" class="play-rewards">还没有待兑换的礼物。</div>
             <p id="playRewardStatus" class="save-status" role="status"></p>
           </article>
 
-          <article class="panel journal-panel">
+          <article class="panel journal-panel" data-layer="growth">
             <p class="eyebrow">慢慢长大的证据</p>
             <h2>成长周记</h2>
             <div id="journalContent" class="journal-content empty-state">
@@ -120,7 +122,7 @@
             </button>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-layer="growth">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">按自己的节奏</p>
@@ -137,7 +139,7 @@
             <div id="skillGroups" class="skill-groups"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-layer="growth">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">有些小事，值得记很久</p>
@@ -196,7 +198,7 @@
               </button>
             </div>
           </article>
-          <details class="panel settings-panel" id="familySettings">
+          <details class="panel settings-panel" id="familySettings" data-layer="settings">
             <summary class="panel-heading">
               <div>
                 <div>
@@ -357,7 +359,7 @@
         </div>
 
         <aside class="side-column">
-          <article class="panel message-panel">
+          <article class="panel message-panel" data-layer="today">
             <div class="panel-heading compact">
               <div>
                 <p class="eyebrow">把爸爸的话，带回家</p>
@@ -391,14 +393,14 @@
             </button>
           </article>
 
-          <article class="panel next-panel">
+          <article class="panel next-panel" data-layer="today">
             <p class="eyebrow">让好奇心带路</p>
             <h2>下一步建议</h2>
             <strong id="nextTitle">正在准备</strong>
             <p id="nextSuggestion">根据兴趣与学习阶段，生成一项短活动。</p>
           </article>
 
-          <details class="panel model-panel" id="modelPanel">
+          <details class="panel model-panel" id="modelPanel" data-layer="settings">
             <summary><h2>爸爸老师的大脑与联网</h2></summary>
             <p class="panel-note">更改后从下一次请求生效。图片使用本机已登录的 Codex 套餐；OpenAI API 另行计费。</p>
             <form id="modelForm" class="stack-form">
@@ -415,7 +417,7 @@
               <p id="modelSaveStatus" class="save-status" role="status"></p>
             </form>
           </details>
-          <details class="panel data-panel">
+          <details class="panel data-panel" data-layer="settings">
             <summary>
               <p class="eyebrow">家庭拥有，也由家庭掌握</p>
               <h2>家庭数据管理</h2>
@@ -456,6 +458,7 @@
     </main>
     <script src="/daily-guidance.js?v=20260909-server-date" defer></script>
     <script src="/parent.js?v=20260927-play-progress" defer></script>
+    <script src="/parent-layers.js?v=20261102-layers" defer></script>
     <script src="/parent-models.js?v=20260910-1" defer></script>
   </body>
 </html>
