@@ -9,3 +9,4 @@
 - Keep the HTTP server bound to `127.0.0.1` unless the owner explicitly changes the safety policy.
 - Any change to model paths, child data, or network endpoints must be visible in `.env` or `README.md`.
 - Verify every change with a small smoke test and report PASS, PARTIAL, FAIL, or NOT RUN honestly.
+- Code layout: `app/main.py` is the composition root — it builds the process services and keeps the conversation pipeline. HTTP routes live in `app/routes/`, deterministic reply text in `app/activity_flow.py`, text helpers in `app/text_utils.py`, the streaming turn registry in `app/stream_turns.py`, request bodies in `app/schemas.py`. Route modules read process services through `app.deps` (late-bound, so tests can still replace them on `app.main`); they never import `app.main` directly. Frontend: `frontend/app.js` wires the page, `transcript-view.js` owns the transcript and media cards, `activity-session.js` owns play receipts and the "正在玩" reminder.

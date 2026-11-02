@@ -19,7 +19,7 @@ FLUSH = json.dumps({"type": "flush"})
 
 def proxy_function(mode):
     """Load just the production route, avoiding app startup and family storage."""
-    path = Path(__file__).parents[1] / "app" / "main.py"
+    path = Path(__file__).parents[1] / "app" / "routes" / "avatar.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     route = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
                  and node.name == "avatar_websocket")
@@ -28,9 +28,12 @@ def proxy_function(mode):
         "asyncio": asyncio,
         "WebSocket": object,
         "WebSocketDisconnect": type("WebSocketDisconnect", (Exception,), {}),
-        "settings": SimpleNamespace(tts_mode=mode, avatar_ws_url="ws://synthetic.invalid"),
+        # The route reads its process services through ``app.deps``.
+        "deps": SimpleNamespace(
+            settings=SimpleNamespace(tts_mode=mode, avatar_ws_url="ws://synthetic.invalid"),
+            parent_enrollment=SimpleNamespace(active=lambda: False),
+        ),
         "app": SimpleNamespace(state=SimpleNamespace(avatar_connected_clients=0)),
-        "parent_enrollment": SimpleNamespace(active=lambda: False),
         "_parent_avatar_configured": lambda: False,
     }
     # Also lets the same regression exercise the old route before the fix exists.
@@ -142,6 +145,7 @@ async def connections(mode="streaming"):
         try:
             for name in ("old", "new"):
                 browser, upstream = Browser(), Upstream(name, writes)
+                browser.app = app  # the route reports connection counts on app.state
                 peer = Connection(browser, upstream, asyncio.create_task(route(browser)))
                 peers.append(peer)
                 await peer.barrier()

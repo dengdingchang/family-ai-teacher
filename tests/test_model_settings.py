@@ -99,8 +99,8 @@ def model_client(model_settings, monkeypatch):
 @pytest.mark.parametrize("headers", [{"Origin": "https://evil.example"}, {"Origin": "http://127.0.0.1:9999"}, {"Sec-Fetch-Site": "cross-site"}, {"Host": "evil.example"}])
 def test_cross_origin_model_operations_are_rejected_before_any_work(model_client, monkeypatch, route, method, headers):
     def no_work(*args): raise AssertionError("forbidden cross-origin work")
-    monkeypatch.setattr("app.main.candidate_settings", no_work)
-    monkeypatch.setattr("app.main.save_settings", no_work)
+    monkeypatch.setattr("app.routes.settings.candidate_settings", no_work)
+    monkeypatch.setattr("app.routes.settings.save_settings", no_work)
     response = getattr(model_client, method)(route, headers=headers)
     assert response.status_code == 403
 

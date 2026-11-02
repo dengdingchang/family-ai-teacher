@@ -12,7 +12,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import app.main as main_module
+from app.routes import enrollment as enrollment_routes
+from app.routes import settings as settings_routes
 from avatar.protocol import state_for_energy
+from fastapi import BackgroundTasks
 from app.main import (
     _activity_turn_reply,
     _compact_assistant_text,
@@ -226,10 +229,10 @@ class MvpUnitTests(unittest.TestCase):
             template = root / "profile.example.json"
             template.write_text(json.dumps({"name": "小宝", "age": 4}, ensure_ascii=False), encoding="utf-8")
             store = MemoryStore(root / "data", root / "data/profile.json", root / "data/history.jsonl", root / "data/events.jsonl", template)
-            background = main_module.BackgroundTasks()
+            background = BackgroundTasks()
             with patch.object(main_module, "memory", store), patch.object(main_module, "_prewarm_nickname") as warm:
                 profile = asyncio.run(
-                    main_module.update_child_profile(
+                    settings_routes.update_child_profile(
                         main_module.ProfileUpdateRequest(name="小宝宝贝"),
                         background,
                     )
@@ -749,7 +752,7 @@ class MvpUnitTests(unittest.TestCase):
             with patch.object(main_module, "memory", store):
                 wrong = main_module.FamilyDataDeleteRequest(scopes=["history"], confirmation="错误")
                 with self.assertRaises(main_module.HTTPException) as raised:
-                    asyncio.run(main_module.delete_parent_data(wrong))
+                    asyncio.run(enrollment_routes.delete_parent_data(wrong))
                 self.assertEqual(raised.exception.status_code, 400)
                 self.assertEqual(len(store.get_history()), 1)
 
@@ -757,7 +760,7 @@ class MvpUnitTests(unittest.TestCase):
                     scopes=["history", "learning_events", "activity"],
                     confirmation="小宝",
                 )
-                result = asyncio.run(main_module.delete_parent_data(request))
+                result = asyncio.run(enrollment_routes.delete_parent_data(request))
                 self.assertTrue(result["ok"])
                 self.assertEqual(store.get_history(), [])
                 self.assertEqual(store.get_recent_learning_events(), [])
