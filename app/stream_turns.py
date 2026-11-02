@@ -102,6 +102,26 @@ def _stage_stream_turn(
         return True
 
 
+def _park_avatar_cue(
+    turn_id: str,
+    sequence: int,
+    cue: tuple[Any, bool],
+    stop_event: threading.Event,
+) -> bool:
+    """Hold a mouth cue until the browser reports its audio is playing.
+
+    The avatar route pops it by ``sequence``. A cancelled or expired turn
+    refuses the cue so the caller can discard it.
+    """
+
+    with _stream_turn_lock:
+        turn = _stream_turns.get(turn_id)
+        if not turn or stop_event.is_set():
+            return False
+        turn.setdefault("avatar_cues", {})[sequence] = cue
+        return True
+
+
 def _cancel_stream_turn(turn_id: str) -> bool:
     with _stream_turn_lock:
         turn = _stream_turns.get(turn_id)

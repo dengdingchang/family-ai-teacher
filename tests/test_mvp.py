@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 import wave
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -711,7 +712,7 @@ class MvpUnitTests(unittest.TestCase):
                     "name": "宝宝",
                     "learning_goals": ["数到20"],
                     "daily_guidance": "  今天   练刷牙  ",
-                    "daily_guidance_date": main_module.datetime.now().astimezone().date().isoformat(),
+                    "daily_guidance_date": datetime.now().astimezone().date().isoformat(),
                     "teacher_style": "playful",
                     "content_boundaries": ["不讲吓人的故事"],
                     "enabled_activities": ["story", "unknown", "story"],
